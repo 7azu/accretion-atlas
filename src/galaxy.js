@@ -1,4 +1,4 @@
-// Die 3D-Szene: schwarzes Loch, Sterne (Notizen), Staub, Nebel, Kometen, Physik, Kamera.
+// The 3D scene contains the black hole, notes, dust, nebulae and comets.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -11,22 +11,19 @@ import {
   BG_VERT, BG_FRAG, LINE_VERT, LINE_FRAG, COMET_VERT, COMET_FRAG, NEB_VERT, NEB_FRAG,
 } from './shaders.js';
 
-// Maßstab: Schwarzschild-Radius in Welteinheiten. Scheibe von 3 rs (innerste stabile Bahn)
-// bis 12 rs, Hüllkugel des Strahlenverfolgers 14 rs.
+// World units per Schwarzschild radius. The disk spans 3 to 12 radii and the ray tracer uses a bounding sphere of 14 radii.
 export const RS = 19.5;
 const BH = { rin: 3.0, rout: 12.0, rbound: 14.0 };
 export const KEEP_OUT = BH.rbound * RS * 1.25;
 
-// Gravitationsparameter (GM) für die Kepler-Bahnen. Alles kreist nach ω = sqrt(GM / r³):
-// innen schneller als außen. Für Lesbarkeit laufen Cluster langsamer als der Staub,
-// Kometen schneller (eigene Zeitskala, gleiches Gesetz).
+// Keplerian angular velocity is sqrt(GM / r³). Clusters move more slowly than dust for legibility. Comets use the same law on a faster clock.
 const GM_DUST = 18500;
 const GM_NODES = GM_DUST * 0.45;
 const GM_COMET = 2.6e6;
 
 const TAU = Math.PI * 2;
-const IDLE_MS = 5000; // ohne Eingabe so lange, dann 30 statt 60 Bilder pro Sekunde
-const SIM_SETTLE_MS = 6000; // so lange laufen die Layout-Kräfte nach neuen Daten
+const IDLE_MS = 5000; // Idle delay before switching from 60 to 30 fps.
+const SIM_SETTLE_MS = 6000; // Time to keep layout forces active after a data change.
 const STAR_WHITE = [1.0, 0.95, 0.88];
 
 function rng(seed) {
@@ -46,7 +43,7 @@ const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a
 const ease = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
 const PALETTE_ORDER = [5, 0, 3, 1, 2, 4, 6];
 
-// Rauchtexturen für die Nebel: 4 Varianten (2x2-Atlas), fBm mit Domain-Warping -> fasrige Schwaden
+// Four domain-warped noise textures share a 2 by 2 atlas.
 let NEB_ATLAS = null;
 function nebulaAtlas() {
   if (NEB_ATLAS) return NEB_ATLAS;
@@ -121,11 +118,10 @@ export class Galaxy {
     this._activeAt = performance.now();
     this._simUntil = 0;
     this.uTime = { value: 0 };
-    this.uFocus = { value: 1700 }; // Schärfeebene: Abstand Kamera -> Blickpunkt
-    // Start-Animation (siehe _intro): Front, hinter der Sterne/Staub/Linien sichtbar sind, und
-    // Einblendung von Himmel, Nebel und Kometen. Ohne Intro sofort alles sichtbar.
+    this.uFocus = { value: 1700 }; // The focus distance runs from the camera to its target.
+    // The expanding intro front reveals stars, dust and links before the sky, nebulae and comets fade in.
     this.uReveal = { value: 1e7 };
-    this.uLens = { value: RS }; // Gravitationslinse für Sterne und Staub (Masse des Lochs)
+    this.uLens = { value: RS }; // Black hole mass used to lens stars and dust.
     this.uIntro = { value: 1 };
     this._setupIntro();
     try {
@@ -140,9 +136,7 @@ export class Galaxy {
     this._raf = this.win.requestAnimationFrame(this._frame);
   }
 
-  // -------------------------------------------------------------------------------------------
-  // Aufbau
-  // -------------------------------------------------------------------------------------------
+  // Scene setup
   _initRenderer() {
     const r = (this.renderer = new THREE.WebGLRenderer({
       canvas: this.doc.createElement('canvas'),
@@ -160,8 +154,7 @@ export class Galaxy {
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(48, 1, 2, 30000);
-    // Sternfeld liegt in der x/y-Ebene (zeigt zur Kamera), die Akkretionsscheibe in x/z:
-    // man sieht das Feld von vorn und das Loch fast von der Seite (wie im Video)
+    // The star field faces the camera in the XY plane. The disk lies in XZ and appears almost edge-on.
     this.homeCam = this.mode === 'local' ? new THREE.Vector3(0, 80, 1400) : new THREE.Vector3(0, 95, 1700);
     this.camera.position.copy(this.homeCam);
 
@@ -190,7 +183,7 @@ export class Galaxy {
   _initScene() {
     const R = rng(7);
 
-    // Himmel mit Rauch
+    // Sky and haze
     this.skyMat = new THREE.ShaderMaterial({
       vertexShader: SKY_VERT, fragmentShader: SKY_FRAG,
       uniforms: { uTint: { value: new THREE.Color(1, 1, 1) }, uTime: this.uTime, uIntro: this.uIntro },
@@ -201,7 +194,7 @@ export class Galaxy {
     sky.frustumCulled = false;
     this.scene.add(sky);
 
-    // Ferne Sterne
+    // Distant stars
     {
       const n = 1300;
       const pos = new Float32Array(n * 3);
@@ -227,14 +220,14 @@ export class Galaxy {
       this.scene.add(pts);
     }
 
-    // Schwarzes Loch: Kugel (Rückseiten), in der pro Pixel Lichtbahnen verfolgt werden
+    // Trace light paths per pixel on the back faces of the bounding sphere.
     this.bhMat = new THREE.ShaderMaterial({
       vertexShader: BH_VERT, fragmentShader: BH_FRAG,
       uniforms: {
         uCam: { value: new THREE.Vector3() }, uTime: { value: 0 }, uRin: { value: BH.rin }, uRout: { value: BH.rout },
         uRbound: { value: BH.rbound }, uRs: { value: RS }, uAccent: { value: new THREE.Color(1, 0.8, 0.6) },
         uAccentMix: { value: 0.05 }, uBright: { value: 0.42 }, uBeam: { value: 1.0 },
-        // leicht gekippte Scheibe: man sieht etwas mehr von oben und sie liegt schräg im Bild
+        // Tilt the disk slightly to reveal its upper surface.
         uN: { value: new THREE.Vector3(-0.13, 1, 0.07).normalize() },
         uIgnite: { value: this.intro ? 0 : 1 },
       },
@@ -246,13 +239,13 @@ export class Galaxy {
     this.bh.frustumCulled = false;
     this.scene.add(this.bh);
 
-    // warmes Glühen um das Loch (wie Streulicht der heißen Scheibe)
+    // Warm glow from the disk
     {
       const c = document.createElement('canvas');
       c.width = c.height = 128;
       const ctx = c.getContext('2d');
       const gr = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-      // Loch in der Mitte: der Schatten soll schwarz bleiben (kein Glühen durch die Lücke innen)
+      // Keep the center clear so the black hole shadow stays dark.
       gr.addColorStop(0, 'rgba(255,255,255,0)');
       gr.addColorStop(0.16, 'rgba(255,255,255,0)');
       gr.addColorStop(0.26, 'rgba(255,255,255,0.45)');
@@ -273,7 +266,7 @@ export class Galaxy {
     this._buildComets();
     this._buildSmoke();
 
-    // Sterne + Verbindungen (Geometrie kommt mit setData)
+    // setData supplies the geometry for stars and links.
     this.starMat = new THREE.ShaderMaterial({
       vertexShader: STAR_VERT, fragmentShader: STAR_FRAG,
       uniforms: {
@@ -282,7 +275,7 @@ export class Galaxy {
       },
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     });
-    // Gegenbilder (zweiter Durchgang derselben Geometrie)
+    // Render the same geometry again for secondary images.
     this.starMat2 = new THREE.ShaderMaterial({
       vertexShader: STAR_VERT, fragmentShader: STAR_FRAG,
       uniforms: { ...this.starMat.uniforms, uSecondary: { value: 1 } },
@@ -294,7 +287,7 @@ export class Galaxy {
     });
   }
 
-  // Staub nur dort, wo etwas ist: eine dünne Hülle ums Loch und kleine Wolken um die Cluster
+  // Place dust in a thin shell around the black hole and in clouds around clusters.
   _buildDust() {
     if (this.dust) {
       this.scene.remove(this.dust);
@@ -305,7 +298,7 @@ export class Galaxy {
     const list = this.clusters.filter((c) => c.key !== '__center').slice(0, 32);
     this.dustClusters = list;
     const shell = this.mode === 'local' ? 600 : 1000;
-    const infall = this.mode === 'local' ? 180 : 320; // Teilchen, die ins Loch spiralen
+    const infall = this.mode === 'local' ? 180 : 320; // Particles spiraling into the black hole
     const per = list.map((c) => Math.round(Math.min(130, 20 + c.ideas * 0.3)));
     const N = shell + infall + per.reduce((a, b) => a + b, 0);
     const aR = new Float32Array(N), aA = new Float32Array(N), aH = new Float32Array(N), aCl = new Float32Array(N);
@@ -386,10 +379,10 @@ export class Galaxy {
     for (let k = 0; k < count; k++) {
       const a = (this.mode === 'local' ? 560 : 640) + R() * 380;
       const e = 0.02 + R() * 0.12;
-      // Bahnebene höchstens ~50° gegen die Bildebene gekippt: Bögen laufen außen um die Kugel
+      // Limit orbital tilt to about 50 degrees so arcs trace the outer sphere in projection.
       const q = new THREE.Quaternion().setFromEuler(new THREE.Euler((R() - 0.5) * 1.7, (R() - 0.5) * 1.7, R() * TAU));
       const w = R() * TAU;
-      const P = new THREE.Vector3(Math.cos(w), Math.sin(w), 0).applyQuaternion(q); // Grundebene x/y
+      const P = new THREE.Vector3(Math.cos(w), Math.sin(w), 0).applyQuaternion(q); // XY reference plane
       const Q = new THREE.Vector3(-Math.sin(w), Math.cos(w), 0).applyQuaternion(q);
       const N = 480;
       const pos = new Float32Array(N * 3);
@@ -435,7 +428,7 @@ export class Galaxy {
   }
 
   _buildSmoke() {
-    // Rauchtextur einmal auf der CPU erzeugen (Value-Noise-fBm, weicher Rand)
+    // Generate the soft-edged fractal noise texture once on the CPU.
     const S = 256;
     const R = rng(13);
     const grid = new Float32Array(33 * 33).map(() => R());
@@ -482,7 +475,7 @@ export class Galaxy {
       s.position.set(Math.cos(ang) * rad, gauss(R) * 260, Math.sin(ang) * rad);
       const sc = 700 + R() * 1300;
       s.scale.set(sc, sc * (0.6 + R() * 0.5), 1);
-      s.renderOrder = -6; // hinter dem schwarzen Loch, damit der Schatten wirklich schwarz bleibt
+      s.renderOrder = -6; // Draw behind the black hole to preserve its shadow.
       this.smoke.push(s);
       this.scene.add(s);
     }
@@ -496,7 +489,7 @@ export class Galaxy {
       this._needPick = true;
       this.wake();
     };
-    // Trifft (cx, cy) das schwarze Loch (Schatten und innerer Ring)?
+    // Test whether the pointer hits the shadow or inner ring.
     this._onHole = (cx, cy) => {
       const rect = this.renderer.domElement.getBoundingClientRect();
       const p = this.project(0, 0, 0, {});
@@ -531,7 +524,7 @@ export class Galaxy {
     el.addEventListener('wheel', this._onWheel, { passive: true });
   }
 
-  // Benutzer tut etwas: wieder volle Bildrate
+  // Restore the full frame rate on user input.
   wake() {
     this._activeAt = performance.now();
   }
@@ -551,9 +544,7 @@ export class Galaxy {
     this.cssScale = h / (2 * t);
   }
 
-  // -------------------------------------------------------------------------------------------
-  // Daten
-  // -------------------------------------------------------------------------------------------
+  // Graph data
   setData(data) {
     const old = this.nodeById;
     this.centerId = data.centerId || null;
@@ -581,7 +572,7 @@ export class Galaxy {
       let spread = cl?.spread || 30;
       if (cl?.dir && n.type !== 'section') {
         const sc = cl.sector;
-        // zufällige Richtung im Kegel um cl.dir, Radius gleichmäßig im Volumen
+        // Sample directions within the cluster cone and distribute radii uniformly by volume.
         const cosA = 1 - R() * (1 - Math.cos(Math.min(sc.half, Math.PI)));
         const sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA));
         const ph = R() * TAU;
@@ -605,7 +596,7 @@ export class Galaxy {
       n.y = base.y + gauss(R) * spread;
       n.z = base.z + gauss(R) * spread;
       if (n.cluster === '__center') {
-        // Abschnitte der zentralen Notiz auf einen Ring ums Loch (in der Ebene des Sternfelds)
+        // Arrange the central note's sections in a ring in the star-field plane.
         const d = new THREE.Vector3(gauss(R), gauss(R), gauss(R) * 0.2).normalize().multiplyScalar(KEEP_OUT + 50);
         n.x = d.x; n.y = d.y; n.z = d.z;
       }
@@ -629,7 +620,7 @@ export class Galaxy {
     this._recolor();
   }
 
-  // Nebel: pro Cluster einige weiche Rauchschichten dort, wo seine Sterne liegen
+  // Layer soft gas around each cluster's stars.
   _buildNebula() {
     if (this.neb) {
       this.scene.remove(this.neb);
@@ -649,7 +640,7 @@ export class Galaxy {
       ext = Math.max(40, ext / members.length);
       const count = Math.round(Math.min(16, 4 + Math.sqrt(members.length) * 0.9));
       for (let j = 0; j < count; j++) {
-        // an einem zufälligen Stern des Clusters, leicht verschoben -> Nebel folgt der Sternverteilung
+        // Offset the cloud from a randomly chosen member so it follows the star distribution.
         const m = members[Math.floor(R() * members.length)];
         offs.push(m.x - cx + gauss(R) * ext * 0.25, m.y - cy + gauss(R) * ext * 0.25, m.z - cz + gauss(R) * ext * 0.25);
         cls.push(k);
@@ -689,7 +680,7 @@ export class Galaxy {
     this.nebMat.uniforms.uRotY.value = 0;
     this.neb = new THREE.Mesh(g, this.nebMat);
     this.neb.frustumCulled = false;
-    this.neb.renderOrder = 1.5; // nach dem Loch (wird von ihm verdeckt), vor Linien und Sternen
+    this.neb.renderOrder = 1.5; // Draw after the black hole, which occludes the gas, and before links and stars.
     this.scene.add(this.neb);
     this._colorNebula();
   }
@@ -699,7 +690,7 @@ export class Galaxy {
     const cols = this.nebMat.uniforms.uColors.value;
     this.dustClusters.forEach((c, k) => {
       const cc = c.color || [0.7, 0.7, 0.7];
-      // Clusterfarbe, etwas zu Grau hin (Gas leuchtet gedämpfter als die Sterne)
+      // Desaturate the cluster color to give the gas a softer glow.
       cols[k].set(cc[0] * 0.75 + 0.12, cc[1] * 0.75 + 0.12, cc[2] * 0.75 + 0.12);
     });
   }
@@ -707,7 +698,7 @@ export class Galaxy {
   _layoutAnchors() {
     const list = this.clusters.filter((c) => c.key !== '__center').sort((a, b) => b.ideas - a.ideas);
     list.forEach((c, i) => {
-      c.order = i; // Rang nach Größe (bestimmt die Farbe)
+      c.order = i; // Size rank determines color.
       c.spread = 22 + Math.sqrt(c.ideas) * 5;
     });
     const isHub = (c) => c.key === '' || list.some((o) => o !== c && o.key.startsWith(c.key + '/'));
@@ -728,7 +719,7 @@ export class Galaxy {
       const th = i * 2.39996 + 0.7;
       fib.push(new THREE.Vector3(Math.cos(th) * rr, yy * 0.85, Math.sin(th) * rr).normalize());
     }
-    // Weg durch die Punkte, immer zum nächsten freien -> aufeinanderfolgende liegen nah beieinander
+    // Visit the nearest unused point so consecutive positions stay close together.
     const order = [];
     const left = fib.slice();
     let cur = left.splice(0, 1)[0];
@@ -746,18 +737,18 @@ export class Galaxy {
       c.sector = { half, r0, r1 };
       const R = (r0 + r1) / 2;
       c.anchor = { x: c.dir.x * R, y: c.dir.y * R, z: c.dir.z * R, R };
-      c.axis = new THREE.Vector3(0, 1, 0); // die ganze Kugel dreht sich langsam um die Hochachse
+      c.axis = new THREE.Vector3(0, 1, 0); // Rotate the sphere slowly around its vertical axis.
     };
     const hasHub = (c) => hubs.some((h) => h.key !== '' && c.key.startsWith(h.key + '/'));
     outer.forEach((c, i) => {
-      const omegaShare = ((4 * Math.PI * weight(c)) / W) * 1.15; // etwas Überlappung, keine Lücken
+      const omegaShare = ((4 * Math.PI * weight(c)) / W) * 1.15; // Overlap adjacent regions slightly to avoid gaps.
       const half = Math.acos(Math.max(-0.95, 1 - omegaShare / (2 * Math.PI)));
       place(c, order[i], half, R0 + (hasHub(c) ? HUB : 0), R1);
     });
     hubs.forEach((c) => {
       const kids = outer.filter((o) => c.key === '' || o.key.startsWith(c.key + '/'));
       if (!kids.length || c.key === '') {
-        place(c, new THREE.Vector3(0, 1, 0), Math.PI, R0, R0 + HUB * 0.7); // ganz innen, rundherum
+        place(c, new THREE.Vector3(0, 1, 0), Math.PI, R0, R0 + HUB * 0.7); // Distribute the innermost clusters around the center.
         return;
       }
       const d = kids.reduce((acc, k) => acc.add(k.dir), new THREE.Vector3());
@@ -771,7 +762,7 @@ export class Galaxy {
       center.dir = null;
       center.spread = 40;
     }
-    // Farben der Cluster aus der pywal-Palette
+    // Assign cluster colors from the active palette.
     const pal = this.colors?.palette?.length ? this.colors.palette : [[0.85, 0.6, 0.5]];
     list.forEach((c, i) => {
       c.color = pal[PALETTE_ORDER[i % PALETTE_ORDER.length] % pal.length];
@@ -811,14 +802,14 @@ export class Galaxy {
         const ux = n.x / r, uy = n.y / r, uz = n.z / r;
         const cosT = Math.max(-1, Math.min(1, ux * dir.x + uy * dir.y + uz * dir.z));
         const th = Math.acos(cosT);
-        // jeder Stern hat seine eigene, leicht verschobene Grenze -> ausgefranste statt scharfer Ränder
+        // Vary each star's boundary slightly to soften the cluster edge.
         if (n.jit == null) {
           const h = (Math.imul(n.index + 7, 2654435761) >>> 0) / 4294967296;
           const h2 = (Math.imul(n.index + 13, 2246822519) >>> 0) / 4294967296;
           n.jit = { r: (h - 0.5) * 110, a: (h2 - 0.5) * 0.3 };
         }
         const half = sc.half + n.jit.a;
-        // weich: leichter Zug zur Kegelmitte (Notizen stärker), außerhalb sanft zurück
+        // Pull stars gently toward the cone center, with a stronger force on notes.
         let fa = th * (n.type === 'page' ? 0.0006 : 0.0001);
         if (th > half) fa += (th - half) * 0.02;
         const tx = dir.x - ux * cosT, ty = dir.y - uy * cosT, tz = dir.z - uz * cosT;
@@ -851,8 +842,7 @@ export class Galaxy {
         }
       }
     };
-    // Lokal: Abschnitte der zentralen Notiz bilden einen Ring in der Scheibenebene ums Loch
-    // Jeder Abschnitt hat einen festen Bahnplatz (gleichmäßig verteilt), der mit ω(RING) umläuft.
+    // Give each section of the central note a slot on a ring in the disk plane. The slots orbit at the ring's angular velocity.
     const RING = (this.RING = KEEP_OUT + 45);
     const ringNodes = nodes.filter((n) => n.cluster === '__center' && n.fx == null);
     ringNodes.forEach((n, i) => {
@@ -872,7 +862,7 @@ export class Galaxy {
       .velocityDecay(0.38)
       .force('link', forceLink(this.links).id((d) => d.id)
         .distance((l, i) => {
-          // Kettenglieder unterschiedlich lang (pseudozufällig, aber stabil) -> natürliche Sternbilder
+          // Stable pseudorandom link lengths give each constellation its shape.
           const j = ((Math.imul(i + 1, 2654435761) >>> 0) % 1000) / 1000;
           if (l.kind === 'tree') return l.source.type === 'page' ? 22 + j * 10 : 14 + j * 16;
           return sameCluster(l) ? 60 : 120;
@@ -886,16 +876,13 @@ export class Galaxy {
       .force('keepout', keepOut)
       .force('ring', ring)
       .stop();
-    // Erstes Einschwingen ohne Bild, damit nichts wild herumfliegt
-    // Neuaufbau: lange einschwingen. Kleine Änderung (z.B. neue Überschrift): kurz, kein Ruckeln.
+    // Settle a fresh layout before displaying it. Small edits need fewer ticks.
     const warm = freshShare > 0.3 ? 200 : freshShare > 0 ? 12 : 0;
     this.sim.alpha(freshShare > 0.3 ? 1 : 0.2);
     this.sim.alphaTarget(0.015);
     this._hasSlots = nodes.some((n) => n.slot != null);
     this._simUntil = performance.now() + SIM_SETTLE_MS;
-    // Beim ersten Aufbau (Startbild bzw. Start-Animation deckt ab) am Stück. Später, z. B. neue
-    // Mitte der lokalen Galaxie, über mehrere Bilder verteilt (blockiert die Oberfläche sonst
-    // spürbar); die Sterne erscheinen dabei vom Loch nach außen, so sieht man das Einschwingen nicht.
+    // Run the first warm-up during the intro. Spread later warm-ups across frames while the reveal hides the motion.
     const first = !this._settledOnce;
     this._settledOnce = true;
     if (first || warm < 40) {
@@ -969,7 +956,7 @@ export class Galaxy {
     this._colorNebula();
     this.glow?.material.color.setRGB(0.8 + acc[0] * 0.2, 0.5 + acc[1] * 0.15, 0.22 + acc[2] * 0.1);
     for (const s of this.smoke) s.material.color.setRGB(0.72 + acc[0] * 0.12, 0.72 + acc[1] * 0.12, 0.74 + acc[2] * 0.12);
-    // Staub: warmweiß, ein Teil leicht im Akzent getönt
+    // Tint a fraction of the warm white dust with the accent color.
     const dc = this.dust?.geometry.getAttribute('aColor');
     if (dc) {
     for (let i = 0; i < dc.count; i++) {
@@ -1038,7 +1025,7 @@ export class Galaxy {
     lc.needsUpdate = la.needsUpdate = true;
   }
 
-  // anchored: Hervorhebung ohne Maus (Vorschau hängt dann am Stern)
+  // An anchored preview follows its star without pointer input.
   setHover(node, anchored = false) {
     if (this.hover === node) return;
     this.hover = node;
@@ -1046,12 +1033,9 @@ export class Galaxy {
     this.opts.onHover?.(node, anchored ? null : this._mouse);
   }
 
-  // -------------------------------------------------------------------------------------------
-  // Bewegung, Kamera
-  // -------------------------------------------------------------------------------------------
+  // Motion and camera
   _physics(dt) {
-    // Kepler: jeder Stern umläuft das Loch in der Bahnebene seines Clusters mit ω = sqrt(GM / r³)
-    // (innen schneller als außen). Drehung um die Bahnachse k nach Rodrigues.
+    // Rotate around the cluster's orbital axis using Rodrigues' formula. Keplerian angular velocity increases at smaller radii.
     const rot = (o, k, a, vx, vy, vz) => {
       const c = Math.cos(a), s = Math.sin(a);
       const x = o[vx], y = o[vy], z = o[vz];
@@ -1066,8 +1050,7 @@ export class Galaxy {
       if (!k) continue;
       const r = Math.hypot(n.x, n.y, n.z);
       if (r < 1) continue;
-      // Cluster drehen sich gemeinsam (starre Scheibe mit ω auf dem Clusterring), sonst würden
-      // innere Übersichts-Cluster ihren Fächern davonlaufen. Staub/Scheibe/Kometen bleiben Kepler.
+      // Rotate clusters together to preserve their relative positions. Dust, disk gas and comets use Keplerian orbits.
       const a = this._omega * dt;
       rot(n, k, a, 'x', 'y', 'z');
       rot(n, k, a, 'vx', 'vy', 'vz');
@@ -1083,10 +1066,7 @@ export class Galaxy {
     }
     for (const cl of this.clusters) if (cl.dir) rot(cl.dir, cl.axis, this._omega * dt, 'x', 'y', 'z');
     if (this.nebMat) this.nebMat.uniforms.uRotY.value += this._omega * dt;
-    // Kräfte jedes Bild (seltener rechnen ließ die Sterne in Schüben zittern), aber nur bis das
-    // Layout steht: danach drehen sich die Cluster als Ganzes weiter (oben), die Kräfte ändern
-    // nichts Sichtbares mehr und kosteten ~5 ms pro Bild. Der Abschnitts-Ring der lokalen Galaxie
-    // (slot) wird von Kräften geführt und braucht sie weiter.
+    // Apply forces every frame while settling to avoid jitter. Once the layout stabilizes, only the local section ring still needs forces.
     if (this._hasSlots || performance.now() < this._simUntil) this.sim?.tick();
   }
 
@@ -1142,7 +1122,7 @@ export class Galaxy {
     this.comets.forEach((c, i) => {
       c.M = (c.M + c.n * dt) % TAU;
       c.mat.uniforms.uM.value = c.M;
-      // Kepler-Gleichung M = E - e·sin E (Newton-Verfahren)
+      // Solve Kepler's equation M = E - e sin(E) with Newton's method.
       let E = c.M;
       for (let k = 0; k < 6; k++) E -= (E - c.e * Math.sin(E) - c.M) / (1 - c.e * Math.cos(E));
       const nu = 2 * Math.atan2(Math.sqrt(1 + c.e) * Math.sin(E / 2), Math.sqrt(1 - c.e) * Math.cos(E / 2));
@@ -1160,9 +1140,7 @@ export class Galaxy {
     this.lastInteract = performance.now();
   }
 
-  // Übergang zu Obsidian: Stern hervorheben und die Kamera nur sanft auf ihn zuschieben (das Loch
-  // bleibt etwa gleich groß, kostet also nicht mehr GPU). Kamera und Blickpunkt rücken gemeinsam,
-  // der Stern bleibt an seiner Stelle im Bild.
+  // Move the camera and target together toward the highlighted star to keep it in place on screen and limit the change in apparent disk size.
   nudgeToward(node, share = 0.14, dur = 1.4) {
     this.setHover(node, true);
     const delta = new THREE.Vector3(node.x, node.y, node.z).sub(this.camera.position).multiplyScalar(share);
@@ -1207,7 +1185,7 @@ export class Galaxy {
     this.setHover(n, true);
   }
 
-  // Scheinbarer Radius des Schattens in CSS-Pixeln
+  // Apparent shadow radius in CSS pixels
   holeRadius() {
     const d = Math.max(1, this.camera.position.distanceTo(new THREE.Vector3(0, 0, 0)));
     return ((2.598 * RS) / d) * this.cssScale;
@@ -1237,10 +1215,7 @@ export class Galaxy {
     return n ? this._v.set(n.x, n.y, n.z) : null;
   }
 
-  // -------------------------------------------------------------------------------------------
-  // Start-Animation: die Scheibe zündet von innen nach außen, die Kamera schwenkt aus der Ferne
-  // in die Startansicht, Sterne/Staub/Linien erscheinen vom Loch nach außen, danach Nebel,
-  // Himmel und Kometen, zuletzt die Oberfläche (opts.onIntroUi).
+  // The intro ignites the disk from the inside out and moves the camera inward. Stars, dust and links appear first, followed by gas, sky, comets and the interface.
   _setupIntro() {
     const still = !!this.win.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     this.intro = { t: 0, dur: still ? 0.6 : 2.3, still, flash: 0, ui: false };
@@ -1248,13 +1223,13 @@ export class Galaxy {
     this.uIntro.value = 0;
   }
 
-  // Gibt true zurück, solange die Animation die Kamera führt.
+  // Return true while the intro controls the camera.
   _intro(dt) {
     const it = this.intro;
     if (!it) return false;
     it.t += dt;
     const k = Math.min(1, it.t / it.dur);
-    // weicher Anlauf, schnellste Bewegung bei 1/3, langes sanftes Ausrollen (Ableitung 12k(1-k)²)
+    // Peak speed occurs one third of the way through the motion. The derivative is 12k(1-k)².
     const glide = (x) => {
       const c = Math.min(1, Math.max(0, x));
       return 1 - Math.pow(1 - c, 3) * (1 + 3 * c);
@@ -1275,7 +1250,7 @@ export class Galaxy {
       this.opts.onIntroUi?.();
     }
 
-    // Kamera: auf einer Kugelbahn aus größerer Entfernung, seitlich und von oben, in die Startansicht
+    // Approach along a spherical arc from above and to the side.
     const home = this.homeCam;
     const d0 = home.length();
     const az0 = Math.atan2(home.x, home.z);
@@ -1299,7 +1274,7 @@ export class Galaxy {
     return true;
   }
 
-  // Bildschirmposition (CSS-Pixel) eines Weltpunkts
+  // Project a world point into CSS pixels.
   project(x, y, z, out = {}) {
     const v = this._v.set(x, y, z).applyMatrix4(this.camera.matrixWorldInverse);
     out.depth = -v.z;
@@ -1310,7 +1285,7 @@ export class Galaxy {
     return out;
   }
 
-  // Notizen, die nah genug sind, um ein Namensschild zu bekommen (lokal: alle direkten Nachbarn)
+  // Label nearby notes, including all direct neighbors in local view.
   labelCandidates(limit = 26) {
     const out = [];
     const o = {};
@@ -1348,9 +1323,7 @@ export class Galaxy {
     return best;
   }
 
-  // -------------------------------------------------------------------------------------------
-  // Schleife
-  // -------------------------------------------------------------------------------------------
+  // Render loop
   _frame(t) {
     this._raf = this.win.requestAnimationFrame(this._frame);
     const now = t / 1000;
@@ -1358,9 +1331,7 @@ export class Galaxy {
       this._lastT = 0;
       return;
     }
-    // höchstens ~60 Bilder pro Sekunde (spart Strom auf Monitoren mit hoher Bildrate); im Leerlauf
-    // (keine Maus, kein Flug, keine Start-Animation, kein Einschwingen) 30: die Bewegung ist so
-    // langsam, dass man es kaum sieht, kostet aber nur die Hälfte
+    // Limit rendering to about 60 fps on high-refresh displays. Idle motion needs only 30 fps.
     this._idle = performance.now() - this._activeAt > IDLE_MS && !this.fly && !this.intro && !this._warm && !this._down;
     if (this._lastT && now - this._lastT < (this._idle ? 1 / 31 : 1 / 62)) return;
     const dt = Math.min(0.05, this._lastT ? now - this._lastT : 0.016);
@@ -1370,7 +1341,7 @@ export class Galaxy {
     this.time += dt;
     this.uTime.value = this.time;
     if (this._warm) {
-      // Einschwingen in Häppchen von ~6 ms pro Bild
+      // Settle the layout in roughly 6 ms chunks.
       const w = this._warm;
       const t0 = performance.now();
       while (w.left > 0 && performance.now() - t0 < 6) {
@@ -1395,7 +1366,7 @@ export class Galaxy {
     if (this.dust) {
       this.dustMat.uniforms.uTime.value = this.orbitTime;
       const cs = this.dustMat.uniforms.uCenters.value;
-      // Wolkenmitte folgt dem Cluster geglättet, damit die Wolke nicht mitruckelt
+      // Smooth the cloud's motion as it follows its cluster.
       const f = this._dustInit ? Math.min(1, this._dt * 1.5) : 1;
       this._dustInit = true;
       this.dustClusters.forEach((c, k) => {
@@ -1404,7 +1375,7 @@ export class Galaxy {
       });
     }
 
-    // Kamera: Flug, Mitbewegen mit Cluster/Stern, langsames Drehen
+    // Camera flight, tracking and idle rotation
     const before = this._followTarget()?.clone();
     if (this.fly) {
       const f = this.fly;
@@ -1423,7 +1394,7 @@ export class Galaxy {
     }
     const introCam = this._intro(dt);
     this._prevFollow = this._followTarget()?.clone() || null;
-    // Leerlauf: Kamera schwenkt langsam ±15° hin und her (Periode ~100 s) statt ganz herum
+    // Pan through roughly ±15 degrees over a 100-second idle cycle.
     this.controls.autoRotate = !this.paused && !this.fly && !introCam && performance.now() - this.lastInteract > 7000;
     this.controls.autoRotateSpeed = 0.16 * Math.cos(this.time * 0.063);
     this.controls.enabled = !this.fly && !introCam;
@@ -1432,9 +1403,7 @@ export class Galaxy {
     this.bhMat.uniforms.uCam.value.copy(this.camera.position).multiplyScalar(1 / RS);
     this.uFocus.value = this.camera.position.distanceTo(this.controls.target);
     if (this.nebMat) this.nebMat.uniforms.uTime.value = this.time;
-    // Erscheint das Loch groß (nah dran oder herangezoomt), Glühen und Bloom zurücknehmen: die sehr
-    // helle Scheibe würde sonst grauen Schleier in den Schatten streuen. Maß: scheinbarer Radius der
-    // Scheibe in Pixeln (Übersicht ~140 px -> volles Glühen).
+    // Reduce glow and bloom as the disk grows on screen so scattered light does not wash out the shadow. Full glow corresponds to about 140 pixels.
     const cd = Math.max(1, this.camera.position.length());
     const appR = ((BH.rout * RS) / cd) * this.cssScale;
     const big = Math.min(1, Math.max(0, (appR - 110) / 150));
@@ -1471,8 +1440,7 @@ export class Galaxy {
       this._fpsAcc = 0;
       this._fpsN = 0;
       this.opts.onFps?.(this.fps);
-      // zu langsam (z.B. Laptop): mit geringerer Auflösung rendern
-      // gewollte 30 im Leerlauf zählen nicht als zu langsam
+      // Lower the render resolution when active frames are slow. Exclude the deliberate 30 fps idle limit.
       this._slow = this.fps < 40 && !this._idle ? (this._slow || 0) + 1 : 0;
       if (this._slow >= 3 && this.pixelRatio > 0.6) {
         this.pixelRatio = Math.max(0.6, this.pixelRatio - 0.25);
@@ -1495,7 +1463,7 @@ export class Galaxy {
     el.removeEventListener('pointerleave', this._onLeave);
     el.removeEventListener('dblclick', this._onDbl);
     el.removeEventListener('wheel', this._onWheel);
-    // OrbitControls entfernt seine Dokument-Listener über ownerDocument.
+    // OrbitControls removes document listeners through ownerDocument.
     if (el.ownerDocument !== this.doc) this.doc.adoptNode(el);
     this.controls?.dispose();
     this.scene?.traverse((o) => {

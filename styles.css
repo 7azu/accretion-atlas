@@ -31,7 +31,7 @@
   cursor: pointer;
 }
 
-/* ---- Beschriftungen ---------------------------------------------------------------------- */
+/* Labels */
 .aat-labels {
   position: absolute;
   inset: 0;
@@ -74,7 +74,7 @@
   box-shadow: 0 0 8px currentColor;
 }
 
-/* ---- Kopfzeile ---------------------------------------------------------------------------- */
+/* Header */
 .aat-top {
   position: absolute;
   top: 14px;
@@ -124,7 +124,7 @@
   display: none;
 }
 
-/* ---- Begrüßung / Infos links --------------------------------------------------------------- */
+/* Greeting and local summary */
 .aat-greet,
 .aat-local {
   position: absolute;
@@ -183,7 +183,7 @@
   pointer-events: none;
 }
 
-/* ---- Tooltip ------------------------------------------------------------------------------- */
+/* Tooltip */
 .aat-tip {
   position: absolute;
   left: 0;
@@ -217,7 +217,7 @@
   font-size: 10px;
   color: rgba(255, 255, 255, 0.45);
 }
-/* Vorschau: gerenderter Anfang der Notiz, unten weich ausgeblendet */
+/* Fade out the bottom of the rendered note preview. */
 .aat-pv {
   display: none;
 }
@@ -260,7 +260,7 @@
   border-radius: 6px;
 }
 
-/* ---- Werkzeugleiste ------------------------------------------------------------------------ */
+/* Toolbar */
 .aat-toolbar {
   position: absolute;
   bottom: 32px;
@@ -293,11 +293,11 @@
   height: 14px;
 }
 
-/* ---- Übersicht (Seitenpanel rechts) -------------------------------------------------------- */
+/* Dashboard side panel */
 .aat-root {
   --aat-panel: clamp(320px, 31%, 430px);
 }
-/* Galaxie und Beschriftungen rücken nach links, das Loch bleibt in der freien Fläche mittig */
+/* Shift the galaxy and its labels to keep the black hole centered in the available space. */
 .aat-canvas,
 .aat-labels {
   transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
@@ -323,7 +323,7 @@
   transform: translateX(28px);
   transition: opacity 0.35s, transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
 }
-/* feine Kante links: nur ein Lichtstrich, kein Rahmen */
+/* Use a thin highlight along the left edge. */
 .aat-dash::before {
   content: '';
   position: absolute;
@@ -375,7 +375,7 @@
   width: 14px;
   height: 14px;
 }
-/* Suche: nur eine Linie darunter */
+/* Underline the search field. */
 .aat-search {
   display: flex;
   align-items: center;
@@ -441,7 +441,7 @@
   color: rgba(255, 255, 255, 0.36);
 }
 
-/* Farbwahl: kleine Sterne */
+/* Color swatches */
 .aat-swatches {
   display: flex;
   align-items: center;
@@ -479,7 +479,7 @@
   cursor: pointer;
 }
 
-/* Aktivitätsring */
+/* Activity ring */
 .aat-ring {
   position: relative;
   width: min(100%, 280px);
@@ -582,7 +582,7 @@
   color: var(--aat-chart);
 }
 
-/* Bestand: Zahlen als Zeile */
+/* Display vault totals in one row. */
 .aat-nums {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -610,7 +610,7 @@
   margin-top: 10px;
 }
 
-/* Cluster: ein Spektrum, darunter die Legende */
+/* Cluster spectrum and legend */
 .aat-spectrum {
   display: flex;
   gap: 2px;
@@ -667,7 +667,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Listen mit Punktlinie */
+/* Lists with dotted leaders */
 .aat-lead {
   display: flex;
   align-items: baseline;
@@ -702,7 +702,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Suchergebnisse */
+/* Search results */
 .aat-results {
   margin-top: 10px;
   display: flex;
@@ -748,7 +748,7 @@
   color: rgba(255, 255, 255, 0.45);
 }
 
-/* schmale Ansicht (Seitenleiste): Panel über die ganze Breite */
+/* Use the full view width for the panel in narrow sidebars. */
 @container (max-width: 640px) {
   .aat-root {
     --aat-panel: 100%;
@@ -772,7 +772,7 @@
   }
 }
 
-/* Namensschilder naher Notizen */
+/* Nearby note labels */
 .aat-nlabel {
   position: absolute;
   left: 0;
@@ -792,7 +792,7 @@
   color: rgb(var(--aat-acc));
 }
 
-/* ---- Start-Animation: Oberfläche kommt nach der Szene ------------------------------------- */
+/* Reveal the interface after the scene appears. */
 .aat-root.is-intro .aat-top,
 .aat-root.is-intro .aat-greet,
 .aat-root.is-intro .aat-local,
@@ -830,7 +830,7 @@
   }
 }
 
-/* ---- Schwarzes Loch: Schrift auf dem Bogen, Orbit-Ring beim Darüberfahren ------------------- */
+/* Black hole label and hover ring */
 .aat-hole {
   position: absolute;
   left: 0;

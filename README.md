@@ -1,12 +1,12 @@
 # Accretion Atlas
 
-Explore your notes as stars orbiting a black hole. The global galaxy groups notes by their top-level folder. Notes at the vault root share their own group. The local galaxy follows the active note and shows its linked neighbours up to two steps away. Headings and linked attachments appear alongside notes.
+Explore your notes as stars orbiting a black hole. The global galaxy groups notes by their top-level folder. Notes at the vault root share their own group. The local galaxy follows the active note and shows its linked neighbors up to two steps away. Headings and linked attachments appear alongside notes.
 
-Open the galaxy from the ribbon or search for **Galaxie öffnen** or **Lokale Galaxie öffnen** in the command palette. Hover over a star to preview its note. The dashboard includes vault activity and full-text search.
+Open the galaxy from the ribbon or search for **Open global galaxy** or **Open local galaxy** in the command palette. Hover over a star to preview its note. The dashboard includes vault activity and full-text search.
 
 ## Colors
 
-By default the graph uses your Obsidian theme. In **Settings → Accretion Atlas**, enable **pywal-Farben verwenden** to read RGB triplets from the CSS variables `--ctp-accent` and `--wal-graph-1` through `--wal-graph-7`. Enable your pywal CSS snippet in Obsidian for these variables to be available. Changes apply to open views. The dashboard also lets you select a chart color.
+By default the graph uses your Obsidian theme. In **Settings → Accretion Atlas**, enable **Use pywal colors** to read RGB triplets from the CSS variables `--ctp-accent` and `--wal-graph-1` through `--wal-graph-7`. Enable your pywal CSS snippet in Obsidian for these variables to be available. Changes apply to open views. The dashboard also lets you select a chart color.
 
 ## Build and install
 

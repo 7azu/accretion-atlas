@@ -1,4 +1,4 @@
-// GLSL-Shader der Galaxie. Einheiten im Schwarzes-Loch-Shader: Schwarzschild-Radius rs = 1.
+// Galaxy shaders. The black hole shader uses units of one Schwarzschild radius.
 
 const NOISE = /* glsl */ `
 float hash31(vec3 p) {
@@ -33,19 +33,7 @@ float fbm(vec3 p) {
 }
 `;
 
-// ---------------------------------------------------------------------------------------------
-// Schwarzes Loch: pro Pixel wird ein Lichtstrahl rückwärts von der Kamera durch das
-// Schwarzschild-Feld verfolgt. Bahngleichung (Binet, als Kraftgesetz geschrieben):
-//   d²x/dλ² = -3/2 · h² · x / r⁵   mit h = |x × v| (erhalten), rs = 1
-// Das liefert Schatten (Einfangradius ≈ 2,6 rs), Photonenring und das über/unter den Schatten
-// gebogene Bild der Rückseite der Scheibe.
-// Die Scheibe ist dünnes, leuchtendes Gas (Dicke wächst nach außen) statt einer Fläche: pro
-// Schritt wird die Gauß-Dichte senkrecht zur Scheibe analytisch über das Wegstück integriert
-// (erf), sonst gäbe es bei flachem Blick Stufen. Das Plasma hat Fäden und Knoten, die nach
-// Kepler differentiell rotieren (innen schneller), Doppler-Beaming und einen Farbverlauf von
-// Orange (außen) zu Creme-Weiß (innen). Plasma und Säulenintegration nach
-// github.com/williamwasen/second-brain-black-hole (src/accretion.js, MIT-Lizenz).
-// ---------------------------------------------------------------------------------------------
+// Trace light rays backward through a Schwarzschild field using the Binet equation: d²x/dλ² = -1.5 h² x/r⁵, with conserved h = |x × v| and rs = 1. This produces the shadow, photon ring and lensed far side of the disk. Integrate the vertical Gaussian gas density analytically over each step with erf to avoid grazing-angle banding. The gas thickens outward, rotates differentially and shifts from orange at the rim to cream at the center. Plasma and column integration are adapted from github.com/williamwasen/second-brain-black-hole (src/accretion.js, MIT license).
 export const BH_VERT = /* glsl */ `
 varying vec3 vWorld;
 void main() {
@@ -65,9 +53,9 @@ uniform float uRs;
 uniform vec3 uAccent;
 uniform float uAccentMix;
 uniform float uBright;
-uniform float uBeam;    // Stärke des Doppler-Beamings (1 = wie im Vorbild)
-uniform vec3 uN;        // Normale der Scheibe (leicht gekippt)
-uniform float uIgnite;  // 0..1: die Scheibe zündet beim Start von innen nach außen
+uniform float uBeam;    // Doppler beaming strength (1 matches the reference).
+uniform vec3 uN;        // Normal of the tilted disk
+uniform float uIgnite;  // Intro progress from 0 to 1 as the disk ignites outward.
 varying vec3 vWorld;
 ${NOISE}
 
@@ -80,19 +68,19 @@ float erfA(float x) {
   return sign(x) * (1.0 - poly * exp(-a * a));
 }
 
-// Leuchtendes Gas an Punkt p (Einheiten rs). dir = Laufrichtung des (rückwärts verfolgten) Strahls.
+// Gas emission at p in Schwarzschild radii. dir points along the backward-traced ray.
 vec3 plasma(vec3 p, vec3 dir, out float dens) {
   vec3 bx = normalize(vec3(uN.y, -uN.x, 0.0));
   vec3 by = normalize(cross(uN, bx));
   float x = dot(p, bx), y = dot(p, by), r = length(vec2(x, y));
   float win = smoothstep(uRin * 0.95, uRin * 1.17, r) * (1.0 - smoothstep(uRout * 0.71, uRout * 1.07, r));
-  // Zünden: eine helle Front läuft von innen nach außen, dahinter brennt die Scheibe
+  // A bright ignition front moves outward, leaving glowing gas behind.
   float front = mix(uRin * 0.8, uRout * 1.25, uIgnite);
   float lit = smoothstep(front, front - 2.2, r);
   win *= lit;
   if (win < 0.0001) { dens = 0.0; return vec3(0.0); }
   float a = atan(y, x);
-  // differentielle Rotation: innen ein Umlauf in ~20 s, außen deutlich langsamer
+  // Differential rotation gives the inner disk an orbital period of about 20 seconds.
   float omega = 0.31 * pow(3.4 / r, 1.5);
   float ph = a - uTime * omega;
   float drift = r + uTime * 0.018;
@@ -106,7 +94,7 @@ vec3 plasma(vec3 p, vec3 dir, out float dens) {
   energy *= 0.28 + 1.55 * vn(vec3(cos(ph) * 2.2, sin(ph) * 2.2, uTime * 0.13));
   float falloff = pow(3.8 / r, 3.0);
   dens = win * (0.22 + energy * 0.55);
-  // Kepler-Geschwindigkeit, Doppler: die heranfliegende Seite ist heller und weißer
+  // Keplerian velocity and Doppler beaming brighten and whiten the approaching side.
   vec3 vel = normalize(cross(uN, p)) * sqrt(0.5 / max(r - 1.0, 1.0));
   float dop = clamp(1.0 / (1.0 + uBeam * dot(vel, dir)), 0.65, 1.65);
   float heat = clamp(0.85 - (r - 3.0) * 0.075 + knots * 0.25, 0.0, 1.0);
@@ -117,10 +105,10 @@ vec3 plasma(vec3 p, vec3 dir, out float dens) {
   return tint * (3.8 * falloff * energy * win * pow(dop, 2.3) * flare);
 }
 
-// Einen Lichtstrahl verfolgen. Rückgabe: vorgemischte Farbe + Deckkraft (ohne Schatten).
+// Trace a light ray and return premultiplied color and opacity before applying the shadow.
 vec4 trace(vec3 ro, vec3 rd) {
   float R = uRbound;
-  // außerhalb der Hüllkugel geradlinig bis zur Kugel (dort ist die Ablenkung klein)
+  // Approximate the weakly deflected path outside the bounding sphere with a straight line.
   float bq = dot(ro, rd);
   float c = dot(ro, ro) - R * R;
   if (c > 0.0) {
@@ -133,10 +121,10 @@ vec4 trace(vec3 ro, vec3 rd) {
   vec3 hv = cross(p, v);
   float h2 = dot(hv, hv);
   vec3 col = vec3(0.0);
-  float T = 1.0;   // Durchlässigkeit des Gases
+  float T = 1.0;   // Gas transmittance
   for (int i = 0; i < 720; i++) {
     float r = length(p);
-    // nahe der Photonensphäre (r = 1,5) feiner rechnen: dort kreisen Strahlen mehrfach ums Loch
+    // Use shorter steps near the photon sphere at r = 1.5, where rays can orbit repeatedly.
     float dt = r < 3.0 ? max(0.022 * r, 0.012) : 0.045 * r;
     float r5 = r * r * r * r * r;
     vec3 acc = -1.5 * h2 * p / r5;
@@ -146,7 +134,7 @@ vec4 trace(vec3 ro, vec3 rd) {
     vec3 accn = -1.5 * h2 * pn / rn5;
     vec3 vn1 = v + 0.5 * (acc + accn) * dt;
 
-    // Gas der Scheibe auf diesem Wegstück (Gauß-Säule senkrecht zur Scheibe, analytisch)
+    // Integrate the Gaussian gas column perpendicular to the disk over this segment.
     float h0 = dot(p, uN), h1 = dot(pn, uN);
     float dh = h0 - h1;
     float across = clamp(h0 / (abs(dh) < 1e-5 ? 1e-5 : dh), 0.0, 1.0);
@@ -168,36 +156,32 @@ vec4 trace(vec3 ro, vec3 rd) {
 
     p = pn;
     v = vn1;
-    if (rn < 1.0) break;                             // hinter den Ereignishorizont gefallen
-    if (rn > R * 1.01 && dot(p, v) > 0.0) break;     // entkommen
+    if (rn < 1.0) break;                             // Crossed the event horizon.
+    if (rn > R * 1.01 && dot(p, v) > 0.0) break;     // Escaped.
     if (T < 0.004) break;
   }
-  // Schwaches Gas am Rand deckt kaum ab, sonst läge ein dunkler Saum über dem Nebel dahinter
+  // Keep opacity low in the faint outer gas so it does not leave a dark fringe against the nebula.
   float lum = dot(col, vec3(0.30, 0.55, 0.15)) * uBright;
   return vec4(col, (1.0 - T) * clamp(lum * 2.5, 0.0, 1.0));
 }
-// Schatten: eingefangen wird jeder Strahl mit Stoßparameter b < 3·sqrt(3)/2 rs (≈ 2,598).
-// b = |Kamera × Richtung| ist entlang der Geraden konstant -> schon vor dem Verfolgen bekannt.
+// The shadow captures rays with impact parameter b < 3 sqrt(3)/2 rs. On the incoming straight path, b = |camera × direction| is constant.
 const float B_CRIT = 2.598;
 
 void main() {
   vec3 rd = normalize(vWorld / uRs - uCam);
-  // Ableitungen zuerst (gleichförmiger Kontrollfluss), Pixelgröße in Richtung und in b
+  // Evaluate derivatives before branching to estimate each pixel's angular and impact-parameter footprint.
   vec3 dx = dFdx(rd);
   vec3 dy = dFdy(rd);
   float b0 = length(cross(uCam, rd));
   float fw = max(fwidth(b0), 1e-5);
 
-  // Photonenring: Bilder der Scheibe, deren Licht ums Loch gelaufen ist, sind dünner als ein
-  // Pixel. Dort mehrere Strahlen pro Pixel verfolgen und mitteln (Supersampling), sonst einer.
-  // 4 bzw. 2 Strahlen reichen: 8/4 sah gleich aus (0,1 % der Pixel sichtbar anders), kostete aber
-  // doppelt so viel GPU-Zeit. Diese Strahlen kreisen am längsten und bestimmen die Laufzeit.
+  // Supersample the subpixel photon ring. Four or two rays here gave nearly identical images to eight or four (about 0.1% of pixels differed) at half the GPU cost. Rays near the ring take the longest paths.
   float near = abs(b0 - B_CRIT);
   int n = near < max(0.12, 3.0 * fw) ? 4 : (b0 > B_CRIT - 4.0 * fw && b0 < 3.35) ? 2 : 1;
   vec4 sum = vec4(0.0);
   for (int k = 0; k < 8; k++) {
     if (k >= n) break;
-    // Punkte auf einer Spirale innerhalb des Pixels
+    // Sample a spiral inside the pixel.
     vec2 o = n == 1 ? vec2(0.0) : vec2(0.0);
     if (n > 1) {
       float a = float(k) * 2.39996 + 0.3;
@@ -213,14 +197,12 @@ void main() {
   }
   vec4 res = sum / float(n);
   if (res.a < 0.003) discard;
-  // Helligkeit begrenzen: weit über Weiß sieht man nicht, es würde nur den Bloom in den Schatten tragen
+  // Limit highlights to prevent bloom spilling into the shadow.
   gl_FragColor = vec4(min(res.rgb * uBright, vec3(3.0)), res.a);
 }
 `;
 
-// ---------------------------------------------------------------------------------------------
-// Himmel: dunkler Rauch/Nebel um die ganze Szene
-// ---------------------------------------------------------------------------------------------
+// Dark nebular sky surrounding the scene
 export const SKY_VERT = /* glsl */ `
 varying vec3 vDir;
 void main() {
@@ -232,7 +214,7 @@ void main() {
 export const SKY_FRAG = /* glsl */ `
 uniform vec3 uTint;
 uniform float uTime;
-uniform float uIntro;   // 0..1 beim Start
+uniform float uIntro;   // Intro progress from 0 to 1
 varying vec3 vDir;
 ${NOISE}
 void main() {
@@ -247,11 +229,9 @@ void main() {
 }
 `;
 
-// ---------------------------------------------------------------------------------------------
-// Sterne (Notizen/Abschnitte): weiche Punkte mit Kern + Halo, Größe in Welteinheiten
-// ---------------------------------------------------------------------------------------------
+// Notes and headings are soft point sprites with a core and halo, sized in world units.
 export const STAR_VERT = /* glsl */ `
-// Start: Sterne erscheinen vom Loch nach außen (uReveal = Radius der Front in Welteinheiten)
+// Reveal stars outward from the black hole. uReveal is the front radius in world units.
 uniform float uReveal;
 float reveal(vec3 w) { return 1.0 - smoothstep(uReveal * 0.55, uReveal, length(w)); }
 attribute float aSize;
@@ -263,8 +243,7 @@ uniform float uTime;
 uniform float uMinPx;
 varying vec3 vColor;
 varying float vAlpha;
-// Tiefe: hinter der Schärfeebene (uFocus = Abstand Kamera -> Blickpunkt) gedämpfter,
-// vor und hinter ihr zunehmend unscharf (wie bei einem Objektiv)
+// Dim points behind the focal plane and blur them with distance from it on either side. uFocus is the camera-to-target distance.
 uniform float uFocus;
 float depthFade(float depth) {
   return mix(1.0, 0.36, smoothstep(uFocus - 150.0, uFocus + 650.0, depth));
@@ -272,14 +251,12 @@ float depthFade(float depth) {
 float depthBlur(float depth) {
   return 1.0 + 1.4 * smoothstep(220.0, 900.0, abs(depth - uFocus));
 }
-// Punkt als Gauß-Glocke: Breite sigma = px/6, aber mindestens 0,8 Pixel. Kleinere Punkte werden
-// breiter und dafür schwächer (gleiche Lichtmenge). So hängt die Helligkeit nicht davon ab, wo der
-// Punkt zwischen den Pixeln liegt -> kein Flackern aus der Ferne.
+// Use a Gaussian width of px/6 with a minimum of 0.8 pixels. Widen and dim smaller points to conserve light and prevent subpixel flicker.
 const float SIG_MIN = 0.8;
 varying float vSig;
 varying float vPS;
 varying float vPx;
-// blur > 1: Unschärfe (Tiefenschärfe) - breiter, gleiche Lichtmenge
+// Depth-of-field blur widens the point while preserving its total light.
 float pointSetup(float px, float blur) {
   float sig = max(px / 6.0, SIG_MIN) * blur;
   vSig = sig;
@@ -290,17 +267,13 @@ float pointSetup(float px, float blur) {
   float k = min(px / 6.0 / SIG_MIN, 1.0);
   return k * k / (blur * blur);
 }
-// Gravitationslinse für Punkte (dünne Linse, Masse im Ursprung). Sterne hinter dem Loch erscheinen
-// nach außen verschoben und tangential gestreckt (Bögen um den Schatten); im zweiten Durchgang
-// (uSecondary = 1) das Gegenbild auf der anderen Seite. Einstein-Winkel θE = sqrt(2 rs (Ds-Dl)/(Ds Dl)),
-// also dieselbe Masse wie im Strahlenverfolger der Scheibe. Die Flächenhelligkeit bleibt erhalten:
-// gestreckte Bilder werden größer, nicht heller. (Idee nach second-brain-black-hole, eigene Umsetzung.)
-uniform float uLensRs;     // Schwarzschild-Radius in Welteinheiten, 0 = aus
+// Model the black hole as a thin lens at the origin. Stretch background stars tangentially and render the opposite image in the secondary pass. The Einstein angle is sqrt(2 rs (Ds-Dl)/(Ds Dl)), consistent with the disk ray tracer. Lensing preserves surface brightness. Inspired by second-brain-black-hole, implemented independently.
+uniform float uLensRs;     // Schwarzschild radius in world units. Zero disables lensing.
 uniform float uSecondary;
-// Linse für Punkte etwas stärker als die echte Masse, damit die Bögen in der Übersicht sichtbar werden
+// Exaggerate point lensing slightly to make arcs visible in the overview.
 const float LENS_BOOST = 2.0;
-varying vec2 vAxis;        // radiale Richtung im Sprite (gl_PointCoord, y nach unten)
-varying vec2 vShape;       // Streckung radial / tangential
+varying vec2 vAxis;        // Radial direction in sprite coordinates, with Y increasing downward
+varying vec2 vShape;       // Radial and tangential stretch
 float lens(inout vec4 mv) {
   vAxis = vec2(1.0, 0.0);
   vShape = vec2(1.0);
@@ -317,18 +290,17 @@ float lens(inout vec4 mv) {
   vec2 dir = beta > 1e-7 ? d / beta : vec2(1.0, 0.0);
   float root = sqrt(beta * beta + 4.0 * tE * tE);
   float th = 0.5 * (beta + (sec ? -root : root));
-  // nur in der Nähe des Lochs: weiter weg (schwache Linse) bleiben Sterne, Linien und Klickpunkte
-  // deckungsgleich, auch wenn das Loch dicht vor der Kamera liegt
+  // Restrict lensing to the area near the hole so distant stars, links and hit targets stay aligned.
   float w = sec ? 1.0 : 1.0 - smoothstep(3.0, 6.0, u);
   th = mix(beta, th, w);
   mv.xy = (al + dir * th) * Ds;
   vAxis = vec2(dir.x, -dir.y);
   vShape = mix(vec2(1.0), vec2(0.5 * abs(1.0 + (sec ? -beta : beta) / root), min(abs(th) / max(beta, 1e-7), 14.0)), w);
-  // Bilder im Schatten (Einfangradius 2,6 rs) sieht man nicht
+  // Hide images inside the shadow at 2.6 Schwarzschild radii.
   float shadow = 2.598 * uLensRs / Dl;
   return smoothstep(shadow * 0.98, shadow * 1.12, abs(th)) * (sec ? smoothstep(3.0, 1.5, u) : 1.0);
 }
-// Sprite an die Streckung anpassen (nach pointSetup)
+// Adjust sprite dimensions after pointSetup.
 void lensSprite() {
   vPS = min(vPS * max(1.0, max(vShape.x, vShape.y)), 160.0);
   gl_PointSize = vPS;
@@ -354,10 +326,9 @@ varying float vPx;
 varying vec2 vAxis;
 varying vec2 vShape;
 void main() {
-  vec2 p = (gl_PointCoord * 2.0 - 1.0) * vPS * 0.5;           // Pixel ab der Mitte
+  vec2 p = (gl_PointCoord * 2.0 - 1.0) * vPS * 0.5;           // Pixel offset from the center
   if (length(p) > vPS * 0.5) discard;
-  // gelinste Bilder: radial gestaucht, tangential gestreckt; nie schmaler als ~1 Pixel
-  // (dann entsprechend schwächer, gleiche Lichtmenge)
+  // Compress lensed images radially and stretch them tangentially. Enforce a minimum width of about one pixel and scale intensity to conserve light.
   vec2 sh = max(vShape, vec2(0.8 / max(vSig, 0.01)));
   vec2 q = vec2(dot(p, vAxis), dot(p, vec2(-vAxis.y, vAxis.x))) / sh;
   float rp = length(q);
@@ -368,9 +339,9 @@ void main() {
 }
 `;
 
-// Staub: Position wird im Shader aus Kepler-Bahn berechnet (ω = sqrt(GM/r³))
+// Compute dust positions from Keplerian orbits with angular velocity sqrt(GM/r³).
 export const DUST_VERT = /* glsl */ `
-// Start: Sterne erscheinen vom Loch nach außen (uReveal = Radius der Front in Welteinheiten)
+// Reveal stars outward from the black hole. uReveal is the front radius in world units.
 uniform float uReveal;
 float reveal(vec3 w) { return 1.0 - smoothstep(uReveal * 0.55, uReveal, length(w)); }
 attribute float aR;
@@ -379,15 +350,14 @@ attribute float aH;
 attribute float aSize;
 attribute float aBright;
 attribute vec3 aColor;
-attribute float aCl;      // -1 = Hülle ums Loch, sonst Index des Clusters
+attribute float aCl;      // Use -1 for the shell around the hole, otherwise the cluster index.
 uniform float uTime;
 uniform float uGM;
 uniform float uScale;
 uniform vec3 uCenters[32];
 varying vec3 vColor;
 varying float vAlpha;
-// Tiefe: hinter der Schärfeebene (uFocus = Abstand Kamera -> Blickpunkt) gedämpfter,
-// vor und hinter ihr zunehmend unscharf (wie bei einem Objektiv)
+// Dim points behind the focal plane and blur them with distance from it on either side. uFocus is the camera-to-target distance.
 uniform float uFocus;
 float depthFade(float depth) {
   return mix(1.0, 0.36, smoothstep(uFocus - 150.0, uFocus + 650.0, depth));
@@ -395,14 +365,12 @@ float depthFade(float depth) {
 float depthBlur(float depth) {
   return 1.0 + 1.4 * smoothstep(220.0, 900.0, abs(depth - uFocus));
 }
-// Punkt als Gauß-Glocke: Breite sigma = px/6, aber mindestens 0,8 Pixel. Kleinere Punkte werden
-// breiter und dafür schwächer (gleiche Lichtmenge). So hängt die Helligkeit nicht davon ab, wo der
-// Punkt zwischen den Pixeln liegt -> kein Flackern aus der Ferne.
+// Use a Gaussian width of px/6 with a minimum of 0.8 pixels. Widen and dim smaller points to conserve light and prevent subpixel flicker.
 const float SIG_MIN = 0.8;
 varying float vSig;
 varying float vPS;
 varying float vPx;
-// blur > 1: Unschärfe (Tiefenschärfe) - breiter, gleiche Lichtmenge
+// Depth-of-field blur widens the point while preserving its total light.
 float pointSetup(float px, float blur) {
   float sig = max(px / 6.0, SIG_MIN) * blur;
   vSig = sig;
@@ -413,17 +381,13 @@ float pointSetup(float px, float blur) {
   float k = min(px / 6.0 / SIG_MIN, 1.0);
   return k * k / (blur * blur);
 }
-// Gravitationslinse für Punkte (dünne Linse, Masse im Ursprung). Sterne hinter dem Loch erscheinen
-// nach außen verschoben und tangential gestreckt (Bögen um den Schatten); im zweiten Durchgang
-// (uSecondary = 1) das Gegenbild auf der anderen Seite. Einstein-Winkel θE = sqrt(2 rs (Ds-Dl)/(Ds Dl)),
-// also dieselbe Masse wie im Strahlenverfolger der Scheibe. Die Flächenhelligkeit bleibt erhalten:
-// gestreckte Bilder werden größer, nicht heller. (Idee nach second-brain-black-hole, eigene Umsetzung.)
-uniform float uLensRs;     // Schwarzschild-Radius in Welteinheiten, 0 = aus
+// Model the black hole as a thin lens at the origin. Stretch background stars tangentially and render the opposite image in the secondary pass. The Einstein angle is sqrt(2 rs (Ds-Dl)/(Ds Dl)), consistent with the disk ray tracer. Lensing preserves surface brightness. Inspired by second-brain-black-hole, implemented independently.
+uniform float uLensRs;     // Schwarzschild radius in world units. Zero disables lensing.
 uniform float uSecondary;
-// Linse für Punkte etwas stärker als die echte Masse, damit die Bögen in der Übersicht sichtbar werden
+// Exaggerate point lensing slightly to make arcs visible in the overview.
 const float LENS_BOOST = 2.0;
-varying vec2 vAxis;        // radiale Richtung im Sprite (gl_PointCoord, y nach unten)
-varying vec2 vShape;       // Streckung radial / tangential
+varying vec2 vAxis;        // Radial direction in sprite coordinates, with Y increasing downward
+varying vec2 vShape;       // Radial and tangential stretch
 float lens(inout vec4 mv) {
   vAxis = vec2(1.0, 0.0);
   vShape = vec2(1.0);
@@ -440,18 +404,17 @@ float lens(inout vec4 mv) {
   vec2 dir = beta > 1e-7 ? d / beta : vec2(1.0, 0.0);
   float root = sqrt(beta * beta + 4.0 * tE * tE);
   float th = 0.5 * (beta + (sec ? -root : root));
-  // nur in der Nähe des Lochs: weiter weg (schwache Linse) bleiben Sterne, Linien und Klickpunkte
-  // deckungsgleich, auch wenn das Loch dicht vor der Kamera liegt
+  // Restrict lensing to the area near the hole so distant stars, links and hit targets stay aligned.
   float w = sec ? 1.0 : 1.0 - smoothstep(3.0, 6.0, u);
   th = mix(beta, th, w);
   mv.xy = (al + dir * th) * Ds;
   vAxis = vec2(dir.x, -dir.y);
   vShape = mix(vec2(1.0), vec2(0.5 * abs(1.0 + (sec ? -beta : beta) / root), min(abs(th) / max(beta, 1e-7), 14.0)), w);
-  // Bilder im Schatten (Einfangradius 2,6 rs) sieht man nicht
+  // Hide images inside the shadow at 2.6 Schwarzschild radii.
   float shadow = 2.598 * uLensRs / Dl;
   return smoothstep(shadow * 0.98, shadow * 1.12, abs(th)) * (sec ? smoothstep(3.0, 1.5, u) : 1.0);
 }
-// Sprite an die Streckung anpassen (nach pointSetup)
+// Adjust sprite dimensions after pointSetup.
 void lensSprite() {
   vPS = min(vPS * max(1.0, max(vShape.x, vShape.y)), 160.0);
   gl_PointSize = vPS;
@@ -460,8 +423,7 @@ void main() {
   vec3 pos;
   float life = 1.0;
   if (aCl < -1.5) {
-    // fällt auf einer Spirale ins Loch: der Radius schrumpft, der Umlauf wird schneller, die Bahn
-    // legt sich dabei in die Ebene der Scheibe. Danach beginnt das Teilchen außen von vorn.
+    // As a particle spirals inward, its orbit accelerates and settles into the disk plane. Restart it at the outer edge.
     float period = 46.0 + 34.0 * fract(aA * 7.13);
     float pr = fract(aA * 0.159155 + uTime / period);
     float rr = aR * (1.0 - 0.93 * pow(pr, 1.6));
@@ -469,12 +431,12 @@ void main() {
     pos = vec3(cos(ang) * rr, aH * (1.0 - pr) * (1.0 - pr), sin(ang) * rr);
     life = smoothstep(0.0, 0.12, pr) * smoothstep(uLensRs * 3.2, uLensRs * 6.0, rr);
   } else if (aCl < 0.0) {
-    // Kepler-Bahn ums schwarze Loch
+    // Keplerian orbit around the black hole
     float om = sqrt(uGM / (aR * aR * aR));
     float ang = aA - om * uTime;
     pos = vec3(cos(ang) * aR, aH, sin(ang) * aR);
   } else {
-    // Wolke um den Cluster: kreist langsam um dessen Mitte und wandert mit ihm
+    // Orbit the cluster center slowly and follow its motion.
     float ang = aA - uTime * 0.12 / sqrt(aR + 8.0);
     pos = uCenters[int(aCl + 0.5)] + vec3(cos(ang) * aR, aH, sin(ang) * aR);
   }
@@ -490,20 +452,18 @@ void main() {
 }
 `;
 
-// Ferne Hintergrundsterne: feste Pixelgröße
+// Distant stars have a fixed pixel size.
 export const BG_VERT = /* glsl */ `
 uniform float uIntro;
 attribute float aSize;
 attribute float aBright;
 varying float vB;
-// Punkt als Gauß-Glocke: Breite sigma = px/6, aber mindestens 0,8 Pixel. Kleinere Punkte werden
-// breiter und dafür schwächer (gleiche Lichtmenge). So hängt die Helligkeit nicht davon ab, wo der
-// Punkt zwischen den Pixeln liegt -> kein Flackern aus der Ferne.
+// Use a Gaussian width of px/6 with a minimum of 0.8 pixels. Widen and dim smaller points to conserve light and prevent subpixel flicker.
 const float SIG_MIN = 0.8;
 varying float vSig;
 varying float vPS;
 varying float vPx;
-// blur > 1: Unschärfe (Tiefenschärfe) - breiter, gleiche Lichtmenge
+// Depth-of-field blur widens the point while preserving its total light.
 float pointSetup(float px, float blur) {
   float sig = max(px / 6.0, SIG_MIN) * blur;
   vSig = sig;
@@ -532,17 +492,16 @@ void main() {
 }
 `;
 
-// Verbindungen
+// Graph links
 export const LINE_VERT = /* glsl */ `
-// Start: Sterne erscheinen vom Loch nach außen (uReveal = Radius der Front in Welteinheiten)
+// Reveal stars outward from the black hole. uReveal is the front radius in world units.
 uniform float uReveal;
 float reveal(vec3 w) { return 1.0 - smoothstep(uReveal * 0.55, uReveal, length(w)); }
 attribute vec3 aColor;
 attribute float aAlpha;
 varying vec3 vC;
 varying float vA;
-// Tiefe: hinter der Schärfeebene (uFocus = Abstand Kamera -> Blickpunkt) gedämpfter,
-// vor und hinter ihr zunehmend unscharf (wie bei einem Objektiv)
+// Dim points behind the focal plane and blur them with distance from it on either side. uFocus is the camera-to-target distance.
 uniform float uFocus;
 float depthFade(float depth) {
   return mix(1.0, 0.36, smoothstep(uFocus - 150.0, uFocus + 650.0, depth));
@@ -566,8 +525,7 @@ void main() {
 }
 `;
 
-// Kometen: Schweif = Bahnstück hinter dem Kopf. aM = mittlere Anomalie des Bahnpunkts,
-// dadurch ist der Schweif zeitlich gleich lang und am Perizentrum (schneller) räumlich länger.
+// A comet tail traces a fixed interval of mean anomaly behind the head. Its spatial length increases near periapsis where the comet travels faster.
 export const COMET_VERT = /* glsl */ `
 attribute float aM;
 uniform float uM;
@@ -589,13 +547,9 @@ void main() {
 }
 `;
 
-// ---------------------------------------------------------------------------------------------
-// Nebel um die Cluster: viele weiche, sich überlagernde Rauchschichten (zur Kamera gedreht) in
-// verschiedenen Tiefen. Sie sitzen dort, wo die Sterne des Clusters liegen, drehen mit der Kugel
-// mit (uRotY) und wirbeln langsam in sich. Nahe an der Kamera blenden sie weich aus.
-// ---------------------------------------------------------------------------------------------
+// Build each nebula from overlapping camera-facing layers at different depths among the cluster's stars. Rotate with the cluster, swirl the gas and fade it near the camera.
 export const NEB_VERT = /* glsl */ `
-// Start: Sterne erscheinen vom Loch nach außen (uReveal = Radius der Front in Welteinheiten)
+// Reveal stars outward from the black hole. uReveal is the front radius in world units.
 uniform float uReveal;
 float reveal(vec3 w) { return 1.0 - smoothstep(uReveal * 0.55, uReveal, length(w)); }
 attribute vec3 aOff;
@@ -615,13 +569,12 @@ varying vec3 vCol;
 varying float vA;
 varying float vTex;
 void main() {
-  // Versatz mit der Kugel um die Hochachse drehen (gleiche Richtung wie in der Physik)
+  // Rotate the offset around the vertical axis with the simulated cluster.
   float c = cos(uRotY), s = sin(uRotY);
   vec3 off = vec3(aOff.x * c + aOff.z * s, aOff.y, aOff.z * c - aOff.x * s);
   int k = int(aCl + 0.5);
   vec4 mv = modelViewMatrix * vec4(uCenters[k] + off, 1.0);
-  // Schichten, die in Blickrichtung vor dem schwarzen Loch liegen, ausblenden: sonst legt sich
-  // grauer Dunst über den Schatten
+  // Fade layers in front of the hole to keep haze out of its shadow.
   vec4 bh = viewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
   float inFront = step(bh.z, mv.z);
   float lat = length(mv.xy / max(-mv.z, 1.0) - bh.xy / max(-bh.z, 1.0));

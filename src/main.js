@@ -1,4 +1,4 @@
-// Galaxie: der Vault als 3D-Galaxie mit schwarzem Loch.
+// Render the vault as a galaxy surrounding a black hole.
 import { Plugin, ItemView, PluginSettingTab, Setting, TFile, MarkdownRenderer, debounce } from 'obsidian';
 import { buildModel, localModel, signature, clusterOf } from './model.js';
 import { Galaxy } from './galaxy.js';
@@ -8,8 +8,7 @@ const VIEW_TYPE = 'accretion-atlas';
 const ICON = 'orbit';
 
 
-// Farben aus dem pywal-Snippet (wal-colors.css): --ctp-accent und --wal-graph-1..7.
-// Fallback auf die normalen Obsidian-Farbvariablen, wenn das Snippet aus ist.
+// Read optional pywal RGB triplets from the active snippet and fall back to Obsidian theme colors.
 function readColors(usePywal) {
   const cs = getComputedStyle(document.body);
   const parse = (s) => {
@@ -48,7 +47,7 @@ class GalaxyView extends ItemView {
     return VIEW_TYPE;
   }
   getDisplayText() {
-    return this.mode === 'local' ? 'Lokale Galaxie' : 'Galaxie';
+    return this.mode === 'local' ? 'Local galaxy' : 'Galaxy';
   }
   getIcon() {
     return ICON;
@@ -77,7 +76,7 @@ class GalaxyView extends ItemView {
     this.prevVisit = this.plugin.prevVisit;
     this.ready = true;
     this.stopWatchingWindow = this.root.onWindowMigrated?.(() => this._rebuild());
-    // setState (mit dem Modus) kommt direkt nach onOpen: Aufbau einen Takt später
+    // Wait one tick so setState can supply the view mode after onOpen.
     this.root.win.setTimeout(() => {
       if (this.ready && !this.galaxy) this._rebuild();
     }, 0);
@@ -110,11 +109,11 @@ class GalaxyView extends ItemView {
   }
 
   _showRenderError(error) {
-    console.error('Galaxie:', error);
+    console.error('Accretion Atlas:', error);
     this.galaxy?.dispose();
     this.galaxy = null;
     this.overlay.endIntro();
-    this.overlay.showEmpty('Die Galaxie konnte nicht gerendert werden.');
+    this.overlay.showEmpty('The galaxy could not be rendered.');
   }
 
   refresh() {
@@ -128,7 +127,7 @@ class GalaxyView extends ItemView {
         this.galaxy.setData({ nodes: [], links: [], clusters: [] });
         this.sig = '';
         this.overlay.setData(null, model.stats, 'local');
-        this.overlay.showEmpty('Öffne eine Notiz, dann erscheint hier ihre Galaxie.');
+        this.overlay.showEmpty('Open a note to see its local galaxy.');
         return;
       }
       this.center = data.centerId;
@@ -144,7 +143,7 @@ class GalaxyView extends ItemView {
   setCenter(path) {
     if (this.mode !== 'local' || path === this.center) return;
     this.center = path;
-    // Neue Mitte: Szene neu aufbauen, damit die Sterne sauber um das neue Loch einschwingen
+    // Rebuild around the new center so stars settle into their orbits.
     this.galaxy?.nodeById.clear();
     this.refresh();
   }
@@ -181,7 +180,7 @@ class GalaxyView extends ItemView {
     const eState = heading ? { subpath: '#' + heading } : undefined;
     let leaf = null;
     if (!newTab) {
-      // zuletzt benutzten Editor wiederverwenden, nie die Galaxie selbst ersetzen
+      // Reuse the most recent editor in this window and keep the galaxy open.
       const md = ws.getLeavesOfType('markdown').filter((l) => l.getContainer() === this.leaf.getContainer());
       md.sort((a, b) => (b.activeTime || 0) - (a.activeTime || 0));
       leaf = md[0] || null;
@@ -191,8 +190,7 @@ class GalaxyView extends ItemView {
     ws.revealLeaf(leaf);
   }
 
-  // Vorschau beim Hover: Anfang der Notiz bzw. nur der Abschnitt, mit Obsidians Markdown-Renderer.
-  // Gibt false zurück, wenn es nichts zu zeigen gibt.
+  // Render the beginning of a note or the selected section. Return false for an empty preview.
   async renderPreview(node, el, component) {
     const file = this.app.vault.getAbstractFileByPath(node.path);
     if (!(file instanceof TFile)) return false;
@@ -211,7 +209,7 @@ class GalaxyView extends ItemView {
     }
     let to = lines.length;
     if (node.type === 'section') {
-      // Abschnitt: von seiner Überschrift bis zur nächsten gleich hohen oder höheren
+      // Stop at the next heading of equal or higher rank.
       const heads = this.app.metadataCache.getFileCache(file)?.headings ?? [];
       const nth = Number(/#(\d+)$/.exec(node.id.slice(node.path.length + 1 + node.heading.length))?.[1] || 1);
       const same = heads.filter((h) => h.heading === node.heading);
@@ -240,15 +238,12 @@ class GalaxyView extends ItemView {
 
 export default class AccretionAtlas extends Plugin {
   async onload() {
-    // "Zuletzt hier" bezieht sich auf die vorige Sitzung; die aktuelle wird laufend gespeichert.
-    // Pro Rechner im localStorage (nicht in data.json): der Vault wird per Git zwischen Rechnern
-    // synchronisiert, häufige Schreibzugriffe auf eine gesyncte Datei gäben Merge-Konflikte.
+    // Keep the previous visit in device-local storage. Frequent updates to a synced settings file can cause merge conflicts.
     this.prevVisit = Number(this.loadLocal('lastVisit')) || 0;
     this.registerInterval(window.setInterval(() => {
       if (this.views().length) this.rememberVisit();
     }, 5 * 60 * 1000));
-    // Einstellungen (data.json, selten geschrieben): Farbe der Dashboard-Diagramme.
-    // 'accent' = pywal-Akzent, 'p0'..'p6' = --wal-graph-1..7, sonst '#rrggbb'.
+    // Chart colors use the accent, a palette entry (p0 through p6) or a custom hex value.
     this.settings = Object.assign({ chartColor: 'accent', usePywal: false }, await this.loadData());
     this.colors = readColors(this.settings.usePywal);
     this.addSettingTab(new ColorSettings(this.app, this));
@@ -257,9 +252,9 @@ export default class AccretionAtlas extends Plugin {
     this.lastFile = this.app.workspace.getActiveFile()?.path || null;
 
     this.registerView(VIEW_TYPE, (leaf) => new GalaxyView(leaf, this));
-    this.addRibbonIcon(ICON, 'Galaxie öffnen', () => this.openGlobal());
-    this.addCommand({ id: 'open-global', name: 'Galaxie öffnen (alle Notizen)', callback: () => this.openGlobal() });
-    this.addCommand({ id: 'open-local', name: 'Lokale Galaxie öffnen (aktuelle Notiz)', callback: () => this.openLocal() });
+    this.addRibbonIcon(ICON, 'Open global galaxy', () => this.openGlobal());
+    this.addCommand({ id: 'open-global', name: 'Open global galaxy', callback: () => this.openGlobal() });
+    this.addCommand({ id: 'open-local', name: 'Open local galaxy', callback: () => this.openLocal() });
 
     const invalidate = debounce(() => this.invalidate(), 1200, true);
     this.registerEvent(this.app.metadataCache.on('resolved', invalidate));
@@ -353,9 +348,7 @@ export default class AccretionAtlas extends Plugin {
     ws.revealLeaf(leaf);
   }
 
-  // ------------------------------------------------------------------------------------------
-  // Volltextsuche fürs Dashboard (Inhalt einmal lesen, dann im Speicher)
-  // ------------------------------------------------------------------------------------------
+  // Cache note contents in memory for dashboard search.
   dropSearch(path) {
     if (this.searchIndex) this.searchIndex = this.searchIndex.filter((e) => e.path !== path).concat(this._indexOne(path) || []);
   }
@@ -419,8 +412,8 @@ class ColorSettings extends PluginSettingTab {
   display() {
     this.containerEl.empty();
     new Setting(this.containerEl)
-      .setName('pywal-Farben verwenden')
-      .setDesc('Übernimmt die Farbvariablen eines aktiven pywal-CSS-Snippets. Ohne Snippet gelten die Theme-Farben.')
+      .setName('Use pywal colors')
+      .setDesc('Use the colors from your active pywal CSS snippet. If the snippet is unavailable, use theme colors.')
       .addToggle((toggle) => toggle.setValue(this.plugin.settings.usePywal).onChange(async (enabled) => {
         this.plugin.settings.usePywal = enabled;
         this.plugin.refreshColors();

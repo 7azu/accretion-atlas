@@ -1,8 +1,4 @@
-// Baut aus dem Vault das Modell der Galaxie:
-//   Notiz      -> großer Stern ("page")
-//   Überschrift (Ebene 1-3) -> kleiner Stern ("section", eine "Idee")
-//   verlinkter Anhang -> schwacher Punkt ("file")
-// plus Statistiken für das Dashboard.
+// Build the galaxy and its dashboard statistics. Notes are large stars, level 1–3 headings are smaller stars, and linked attachments are faint points.
 import { parseLinktext } from 'obsidian';
 
 export const DAY = 86400000;
@@ -10,7 +6,7 @@ const MAX_LEVEL = 3;
 
 export function clusterOf(path) {
   const dirs = path.split('/').slice(0, -1);
-  if (!dirs.length) return { key: '', name: 'Vault', sub: 'Hauptordner' };
+  if (!dirs.length) return { key: '', name: 'Vault', sub: 'Root folder' };
   return { key: '/' + dirs[0], name: dirs[0], sub: '' };
 }
 
@@ -32,12 +28,12 @@ export function buildModel(app) {
     return clusters.get(c.key);
   };
 
-  // 1. Notizen und ihre Überschriften
+  // Collect notes and headings.
   for (const f of files) {
     const cl = clusterFor(f.path);
     const page = {
       id: f.path, type: 'page', name: f.basename, path: f.path, cluster: cl.key, level: 0,
-      // Erstellt = früheres Datum: Kopieren/Git-Sync setzt die Erstellungszeit sonst auf "jetzt"
+      // Copying or syncing a file can reset its creation time. Use the earlier timestamp.
       mtime: f.stat.mtime, ctime: Math.min(f.stat.ctime || f.stat.mtime, f.stat.mtime), degree: 0, sections: 0, links: 0,
     };
     nodes.set(page.id, page);
@@ -48,8 +44,7 @@ export function buildModel(app) {
     const secs = [];
     const stack = [{ node: page, level: 0 }];
     const seen = new Map();
-    // Abschnitte als Kette in Dokument-Reihenfolge verbinden (Elternteil -> 1. Kind -> 2. Kind ...),
-    // nicht sternförmig: ergibt Sternbild-Linien statt "Pusteblumen"
+    // Link sections in document order, chaining siblings to form constellation lines.
     const lastChild = new Map();
     for (const h of cache?.headings ?? []) {
       if (h.level > MAX_LEVEL) continue;
@@ -74,7 +69,7 @@ export function buildModel(app) {
     sectionsOf.set(f.path, secs);
   }
 
-  // 2. Links: Quelle ist der Abschnitt, in dem der Link steht; Ziel die Notiz bzw. Überschrift
+  // Resolve links from the containing section to the destination note or heading.
   const seenEdge = new Set();
   for (const f of files) {
     const cache = mc.getFileCache(f);
@@ -124,12 +119,12 @@ export function buildModel(app) {
         }
       }
       if (target === src) continue;
-      if (target.type !== 'file' && pageIdOf(target) === page.id) continue; // Links innerhalb der Notiz
+      if (target.type !== 'file' && pageIdOf(target) === page.id) continue; // Skip links within the same note.
       const key = src.id + '\u0000' + target.id;
       if (seenEdge.has(key)) continue;
       seenEdge.add(key);
       links.push({ source: src.id, target: target.id, kind: kind === 'embed' || target.type === 'file' ? 'embed' : 'link' });
-      // Grad: Notizen zählen jede Verbindung einmal, Abschnitte/Anhänge ihre eigenen
+      // Count each connection once per note and track section and attachment degrees separately.
       page.degree++;
       page.links++;
       const tp = target.type === 'file' ? target : pageOf.get(pageIdOf(target));
@@ -149,9 +144,7 @@ export function buildModel(app) {
   return model;
 }
 
-// ---------------------------------------------------------------------------------------------
-// Statistiken fürs Dashboard
-// ---------------------------------------------------------------------------------------------
+// Dashboard statistics
 function bins(times, count, size, now, weights) {
   const out = new Array(count).fill(0);
   times.forEach((t, i) => {
@@ -188,8 +181,7 @@ function buildStats(model, pages) {
   };
 }
 
-// Aktivität der letzten `days` Tage (Kalendertage, heute zuletzt): bearbeitete Notizen (letzte
-// Änderung an dem Tag) und neu angelegte. Es gibt nur die letzte Änderung pro Datei, keine Historie.
+// Calendar days in chronological order, ending today. Each file contributes its creation and most recent edit.
 function activity(pages, days) {
   const first = new Date();
   first.setHours(0, 0, 0, 0);
@@ -215,9 +207,7 @@ function activity(pages, days) {
   return out;
 }
 
-// ---------------------------------------------------------------------------------------------
-// Lokale Galaxie: aktuelle Notiz (wird zum schwarzen Loch) + Nachbarn bis Tiefe 2
-// ---------------------------------------------------------------------------------------------
+// The active note becomes the black hole. Include neighbors up to two steps away.
 export function localModel(model, centerPath) {
   const center = model.byId.get(centerPath);
   if (!center || center.type !== 'page') return null;
@@ -291,7 +281,7 @@ export function localModel(model, centerPath) {
   return out;
 }
 
-// Kurzer Fingerabdruck, um unnötiges Neuaufbauen zu vermeiden
+// Fingerprint the graph to skip redundant rebuilds.
 export function signature(data) {
   let h = 0;
   const add = (s) => {

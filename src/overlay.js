@@ -1,4 +1,4 @@
-// HTML-Oberfläche über der 3D-Szene: Kopfzeile, Begrüßung, Beschriftungen, Werkzeugleiste, Dashboard.
+// HTML controls and labels over the 3D scene.
 import { setIcon, Component } from 'obsidian';
 
 function el(tag, cls, parent, text) {
@@ -9,23 +9,13 @@ function el(tag, cls, parent, text) {
   return e;
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
-const WEEKDAYS = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const fmtDay = (t) => {
   const d = new Date(t);
-  return `${d.getDate()}. ${MONTHS[d.getMonth()]}`;
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 };
 function ago(t) {
-  const s = (Date.now() - t) / 1000;
-  if (s < 90) return 'gerade eben';
-  if (s < 3600) return `vor ${Math.round(s / 60)} Minuten`;
-  if (s < 2 * 3600) return 'vor einer Stunde';
-  if (s < 86400) return `vor ${Math.round(s / 3600)} Stunden`;
-  if (s < 2 * 86400) return 'gestern';
-  return `vor ${Math.round(s / 86400)} Tagen`;
-}
-// Begrüßung links oben ist englisch
-function agoEn(t) {
   const s = (Date.now() - t) / 1000;
   if (s < 90) return 'just now';
   if (s < 3600) return `${Math.round(s / 60)} minutes ago`;
@@ -53,12 +43,11 @@ export class Overlay {
     this.labelLayer = el('div', 'aat-labels', root);
     this.nodeLabels = new Map();
     this._frameNo = 0;
-    // Beschriftung am schwarzen Loch: Schrift auf einem Bogen unter dem Loch, beim Darüberfahren
-    // ein feiner Orbit-Ring. Das Loch selbst ist die Schaltfläche (Galaxy.onHole).
+    // Curve the label beneath the black hole and show an orbital ring on hover. The black hole handles clicks.
     this.homeText = 'Home';
     this._buildHoleLabel();
 
-    // Kopfzeile
+    // Header
     const top = el('div', 'aat-top', root);
     const brand = el('div', 'aat-brand', top);
     this.titleEl = el('div', 'aat-title', brand, 'Galaxy');
@@ -74,7 +63,7 @@ export class Overlay {
     this.empty = el('div', 'aat-empty', root);
     this.empty.setAttribute('role', 'status');
 
-    // Werkzeugleiste unten
+    // Toolbar
     const tb = el('div', 'aat-toolbar', root);
     const btn = (icon, title, fn) => {
       const b = el('div', 'aat-tb', tb);
@@ -83,11 +72,11 @@ export class Overlay {
       b.addEventListener('click', fn);
       return b;
     };
-    btn('minus', 'Herauszoomen', () => view.galaxy?.zoomBy(1.35));
-    btn('plus', 'Hineinzoomen', () => view.galaxy?.zoomBy(0.72));
-    btn('rotate-ccw', 'Ansicht zurücksetzen', () => view.galaxy?.home());
-    this.pauseBtn = btn('pause', 'Bewegung anhalten', () => this.togglePause());
-    btn('maximize', 'Vollbild', () => {
+    btn('minus', 'Zoom out', () => view.galaxy?.zoomBy(1.35));
+    btn('plus', 'Zoom in', () => view.galaxy?.zoomBy(0.72));
+    btn('rotate-ccw', 'Reset view', () => view.galaxy?.home());
+    this.pauseBtn = btn('pause', 'Pause motion', () => this.togglePause());
+    btn('maximize', 'Full screen', () => {
       const doc = root.ownerDocument;
       if (doc.fullscreenElement) doc.exitFullscreen();
       else root.requestFullscreen?.();
@@ -109,29 +98,29 @@ export class Overlay {
     if (!g) return;
     g.setPaused(!g.paused);
     setIcon(this.pauseBtn, g.paused ? 'play' : 'pause');
-    this.pauseBtn.setAttribute('aria-label', g.paused ? 'Bewegung fortsetzen' : 'Bewegung anhalten');
+    this.pauseBtn.setAttribute('aria-label', g.paused ? 'Resume motion' : 'Pause motion');
   }
 
   setFps(fps) {
     this.subEl.textContent = `${this.view.app.vault.getName()} · ${fps} fps`;
   }
 
-  // ------------------------------------------------------------------------------------------
+  // View state
   setData(data, stats, mode, extra = {}) {
     this.data = data;
     this.stats = stats;
     this.mode = mode;
     this.root.classList.toggle('is-local', mode === 'local');
     this.titleEl.textContent = mode === 'local' ? 'Local Galaxy' : 'Galaxy';
-    this.modePill.textContent = mode === 'local' ? 'Global' : 'Lokal';
-    this.modePill.setAttribute('aria-label', mode === 'local' ? 'Ganze Galaxie zeigen' : 'Galaxie der aktuellen Notiz');
+    this.modePill.textContent = mode === 'local' ? 'Global' : 'Local';
+    this.modePill.setAttribute('aria-label', mode === 'local' ? 'Show the entire galaxy' : 'Show the current note’s galaxy');
     if (!this.loading) this.empty.style.display = 'none';
 
     for (const lab of this.nodeLabels.values()) lab.remove();
     this.nodeLabels.clear();
     this._frameNo = 0;
 
-    // Cluster-Beschriftungen
+    // Cluster labels
     const keys = new Set();
     for (const c of data?.clusters || []) {
       if (c.key === '__center') continue;
@@ -147,7 +136,7 @@ export class Overlay {
         this.labels.set(c.key, lab);
       }
       lab._name.textContent = c.name;
-      lab._sub.textContent = `${c.ideas} ${c.ideas === 1 ? 'Idee' : 'Ideen'}`;
+      lab._sub.textContent = `${c.ideas} ${c.ideas === 1 ? 'idea' : 'ideas'}`;
       lab.title = c.sub ? `${c.sub} / ${c.name}` : c.name;
     }
     for (const [k, lab] of this.labels) {
@@ -164,7 +153,7 @@ export class Overlay {
     if (this.dash.classList.contains('is-open') && !this.query) this._buildDashHome();
   }
 
-  // Start-Animation der Galaxie: die Oberfläche kommt erst, wenn die Szene steht
+  // Show the interface after the scene appears.
   beginIntro() {
     this.root.classList.remove('is-intro-done');
     this.root.classList.add('is-intro');
@@ -174,7 +163,7 @@ export class Overlay {
     if (!this.root.classList.contains('is-intro')) return;
     this.root.classList.remove('is-intro');
     this.root.classList.add('is-intro-done');
-    // Die gestaffelten Übergänge nur für dieses eine Einblenden
+    // Apply staggered transitions only during this reveal.
     const win = this.root.win ?? window;
     win.clearTimeout(this._introDone);
     this._introDone = win.setTimeout(() => this.root.classList.remove('is-intro-done'), 1600);
@@ -183,7 +172,7 @@ export class Overlay {
   showLoading() {
     this.loading = true;
     this.labelLayer.style.visibility = 'hidden';
-    this.empty.textContent = 'Galaxie wird geladen …';
+    this.empty.textContent = 'Loading galaxy…';
     this.empty.style.display = '';
   }
 
@@ -214,7 +203,7 @@ export class Overlay {
     const g = this.greet;
     g.empty();
     el('h2', '', g, greeting());
-    if (prevVisit) el('div', 'aat-since', g, `Last here: ${agoEn(prevVisit)}`);
+    if (prevVisit) el('div', 'aat-since', g, `Last here: ${ago(prevVisit)}`);
     const changed = prevVisit ? stats.pagesList.filter((p) => p.mtime > prevVisit).length : stats.updatedWeek;
     const news = prevVisit
       ? changed
@@ -236,11 +225,10 @@ export class Overlay {
     el('div', 'aat-news', l, parts.join(' · '));
   }
 
-  // ------------------------------------------------------------------------------------------
-  // pro Bild: Beschriftungen an die Cluster heften
+  // Anchor labels to projected cluster positions each frame.
   frame(g) {
     const p = this._p;
-    // Cluster-Namen: nähere zuerst platzieren, überlappende rutschen nach unten
+    // Place nearer labels first and shift overlapping labels down.
     const placed = [];
     if (this._holeBox) placed.push(this._holeBox);
     const order = [];
@@ -259,7 +247,7 @@ export class Overlay {
       order.push([lab, q]);
     }
     order.sort((a, b) => a[1].depth - b[1].depth);
-    // Namen, die auf dem schwarzen Loch landen würden, radial nach außen schieben
+    // Push labels outward if they would cover the black hole.
     const hc = g.project(0, 0, 0, this._hc || (this._hc = {}));
     const lim = g.holeRadius() * 2.2 + 16;
     for (const [, q] of order) {
@@ -284,7 +272,7 @@ export class Overlay {
       lab.style.pointerEvents = '';
       lab.style.transform = `translate(${q.x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%)`;
     }
-    // Namensschilder für nahe Notizen (alle paar Bilder neu auswählen, sonst nur mitbewegen)
+    // Update the nearby-note selection every few frames and track positions in between.
     if (this._frameNo++ % 12 === 0) {
       const want = new Set(g.labelCandidates().map((n) => n.id));
       for (const [id, lab] of this.nodeLabels) {
@@ -297,16 +285,15 @@ export class Overlay {
         if (this.nodeLabels.has(id)) continue;
         const n = g.nodeById.get(id);
         const lab = el('div', 'aat-nlabel', this.labelLayer, n.name);
-        lab.style.opacity = '0'; // erst einblenden, wenn eine Position feststeht
+        lab.style.opacity = '0'; // Show the label once its position is known.
         lab.addEventListener('click', (e) => this.view.openPath(n.path, null, e.ctrlKey || e.metaKey));
         this.nodeLabels.set(id, lab);
       }
     }
-    // Überlappungen vermeiden: Cluster-Namen zuerst, dann Notizen nach Wichtigkeit (Reihenfolge der Map)
-    // Begrüßung nur in der Startansicht (sonst überlappt sie mit Beschriftungen)
+    // Place cluster labels first, then notes in priority order. Hide the greeting when the camera leaves its home position.
     const away = !!g.follow || g.camera.position.distanceTo(g.homeCam) > 260 || g.controls.target.length() > 60;
     this.root.classList.toggle('is-away', away);
-    // Sperrflächen: Kopfzeile, Werkzeugleiste, Begrüßung/Info links oben
+    // Reserve space for the header, toolbar and greeting or local summary.
     const W = g.width, H = g.height;
     const taken = [{ x: 0, y: 0, w: W, h: 64 }, { x: W / 2 - 110, y: H - 64, w: 220, h: 64 }];
     if (!away || this.mode === 'local') {
@@ -342,9 +329,7 @@ export class Overlay {
     if (this.loading) this.finishLoading();
   }
 
-  // Hover über einem Stern: sofort Titel und Kurzinfo, nach kurzem Verweilen die Vorschau
-  // (Anfang der Notiz bzw. der Abschnitt). Ohne Maus (z. B. nach "hinfliegen") hängt die Karte
-  // am Stern und wandert mit.
+  // Show the title immediately and render a note or section preview after a short hover. With no pointer, the card tracks its star.
   showTip(node, mouse) {
     const win = this.root.win;
     win.clearTimeout(this._pvTimer);
@@ -364,7 +349,7 @@ export class Overlay {
     this.tip.classList.remove('is-rich');
     const head = el('div', 'aat-tip-head', this.tip);
     el('div', 'aat-tip-title', head, node.type === 'section' ? node.heading : node.name);
-    const sub = node.type === 'section' ? `Abschnitt in ${node.path.split('/').pop().replace(/\.md$/, '')}` : node.type === 'file' ? 'Anhang' : `${node.sections || 0} Abschnitte · ${node.degree} Verbindungen`;
+    const sub = node.type === 'section' ? `Section in ${node.path.split('/').pop().replace(/\.md$/, '')}` : node.type === 'file' ? 'Attachment' : `${node.sections || 0} ${node.sections === 1 ? 'section' : 'sections'} · ${node.degree} ${node.degree === 1 ? 'link' : 'links'}`;
     el('div', 'aat-tip-sub', head, sub);
     const body = el('div', 'aat-pv markdown-rendered', this.tip);
     this.tip.style.opacity = '1';
@@ -378,7 +363,7 @@ export class Overlay {
       try {
         ok = await this.view.renderPreview(node, body, comp);
       } catch (error) {
-        console.warn('Galaxie: Vorschau', error);
+        console.warn('Accretion Atlas preview', error);
       }
       if (token !== this._pvToken) return comp.unload();
       if (ok) {
@@ -388,7 +373,7 @@ export class Overlay {
     }, mouse ? 380 : 150);
   }
 
-  // Karte neben den Stern bzw. die Maus legen, im Bild halten
+  // Keep the card inside the viewport near the star or pointer.
   _placeTip() {
     const g = this.view.galaxy;
     let x, y;
@@ -405,14 +390,14 @@ export class Overlay {
       y = p.y + c.top - r.top;
     } else return;
     const w = this.tip.offsetWidth, h = this.tip.offsetHeight;
-    // an der Maus: rechts unten; am Stern: rechts oben (darunter steht sein Namensschild)
+    // Place the card below the pointer or above the star to leave room for its label.
     let tx = x + (this.tipMouse ? 16 : 30), ty = this.tipMouse ? y + 14 : y - 24;
     if (tx + w > r.width - 12) tx = x - 16 - w;
     if (ty + h > r.height - 12) ty = Math.max(12, r.height - 12 - h);
     this.tip.style.transform = `translate(${Math.max(12, tx).toFixed(1)}px, ${ty.toFixed(1)}px)`;
   }
 
-  // ---- Beschriftung am schwarzen Loch --------------------------------------------------------
+  // Black hole label
   _buildHoleLabel() {
     const NS = 'http://www.w3.org/2000/svg';
     const doc = this.root.ownerDocument;
@@ -456,7 +441,7 @@ export class Overlay {
       this._holeBox = null;
       return;
     }
-    // Schrift unter dem unteren Bogen der Scheibe, Ring knapp außerhalb des Photonenrings
+    // Place the text below the disk and the hover ring just outside the photon ring.
     const R = r0 * 2.7 + 6;
     const ringR = r0 * 2.3;
     const size = Math.ceil(R + 16);
@@ -465,7 +450,7 @@ export class Overlay {
       h._svg.setAttribute('width', String(size * 2));
       h._svg.setAttribute('height', String(size * 2));
       h._svg.setAttribute('viewBox', `0 0 ${size * 2} ${size * 2}`);
-      // von links unten herum nach rechts: Schrift steht aufrecht und liest sich von links nach rechts
+      // Trace the lower arc from left to right to keep the text upright.
       h._arc.setAttribute('d', `M ${size - R} ${size} A ${R} ${R} 0 0 0 ${size + R} ${size}`);
       h._ring.setAttribute('cx', String(size));
       h._ring.setAttribute('cy', String(size));
@@ -477,9 +462,7 @@ export class Overlay {
     this._holeBox = { x: p.x - 70, y: p.y + R - 14, w: 140, h: 24 };
   }
 
-  // ------------------------------------------------------------------------------------------
   // Dashboard
-  // ------------------------------------------------------------------------------------------
   toggleDash(force) {
     const open = force ?? !this.dash.classList.contains('is-open');
     if (open === this.dash.classList.contains('is-open')) return;
@@ -491,17 +474,17 @@ export class Overlay {
     }
   }
 
-  // Übersicht als Seitenpanel rechts: die Galaxie rückt nach links und bleibt sichtbar.
+  // Shift the galaxy left to make room for the dashboard.
   _buildDash() {
     const d = this.dash;
     d.empty();
     const head = el('div', 'aat-dash-head', d);
     const title = el('div', 'aat-dash-title', head);
-    el('div', 'aat-dash-name', title, 'Übersicht');
+    el('div', 'aat-dash-name', title, 'Overview');
     const now = new Date();
-    el('div', 'aat-dash-date', title, `${WEEKDAYS[now.getDay()]}, ${fmtDay(now.getTime())} ${now.getFullYear()}`);
+    el('div', 'aat-dash-date', title, `${WEEKDAYS[now.getDay()]}, ${fmtDay(now.getTime())}, ${now.getFullYear()}`);
     const close = el('div', 'aat-close', head);
-    close.setAttribute('aria-label', 'Schließen');
+    close.setAttribute('aria-label', 'Close');
     setIcon(close, 'x');
     close.addEventListener('click', () => this.toggleDash(false));
 
@@ -509,7 +492,7 @@ export class Overlay {
     setIcon(el('span', 'aat-search-icon', sb), 'search');
     const input = (this.input = el('input', '', sb));
     input.type = 'text';
-    input.placeholder = 'Notizen und Abschnitte durchsuchen';
+    input.placeholder = 'Search notes and sections';
     input.spellcheck = false;
     this.body = el('div', 'aat-dash-body', d);
     this.query = '';
@@ -544,7 +527,7 @@ export class Overlay {
     return sec;
   }
 
-  // Zeile "Name ········ Wert" (Punktlinie wie in einem Inhaltsverzeichnis)
+  // Connect each name and value with a dotted leader.
   _leaderRow(parent, name, value, onClick) {
     const row = el('div', 'aat-lead', parent);
     el('span', 'aat-lead-name', row, name);
@@ -560,9 +543,9 @@ export class Overlay {
     b.empty();
     this.dash.style.setProperty('--aat-chart', this.view.plugin.chartColor());
 
-    // Aktivität: Ring aus 84 Tagen
-    const act = this._section(b, 'Aktivität · 12 Wochen', this._swatches());
-    // gewählten Tag über einen Neuaufbau (Vault geändert) behalten
+    // Activity over the past 84 days
+    const act = this._section(b, 'Activity · 12 weeks', this._swatches());
+    // Keep the selected day when the vault changes.
     const keep = this.day?.t;
     this.day = s.activity.find((d) => d.t === keep) ?? null;
     this._ring(act, s.activity);
@@ -570,22 +553,22 @@ export class Overlay {
     this.dayList = el('div', 'aat-daylist', act);
     this._showDay(this.day);
 
-    // Bestand
-    const stock = this._section(b, 'Bestand');
+    // Vault totals
+    const stock = this._section(b, 'Vault totals');
     const nums = el('div', 'aat-nums', stock);
     const num = (n, label) => {
       const c = el('div', 'aat-numcell', nums);
-      el('div', 'aat-big', c, n.toLocaleString('de-DE'));
+      el('div', 'aat-big', c, n.toLocaleString('en-US'));
       el('div', 'aat-small', c, label);
     };
-    num(s.pages, s.pages === 1 ? 'Notiz' : 'Notizen');
-    num(s.ideas, 'Ideen');
-    num(s.links, 'Verbindungen');
-    const per = s.pages ? (s.links / s.pages).toFixed(1).replace('.', ',') : '0';
-    el('div', 'aat-note', stock, `${s.newWeek} neu und ${s.updatedWeek} bearbeitet in den letzten 7 Tagen · ${per} Verbindungen pro Notiz`);
+    num(s.pages, s.pages === 1 ? 'note' : 'notes');
+    num(s.ideas, s.ideas === 1 ? 'idea' : 'ideas');
+    num(s.links, s.links === 1 ? 'link' : 'links');
+    const per = s.pages ? (s.links / s.pages).toFixed(1) : '0';
+    el('div', 'aat-note', stock, `${s.newWeek} new and ${s.updatedWeek} edited in the last 7 days · ${per} links per note`);
 
-    // Cluster als ein Spektrum
-    const cl = this._section(b, 'Cluster');
+    // Cluster distribution
+    const cl = this._section(b, 'Clusters');
     const list = s.byCluster.filter((c) => c.key !== '__center' && c.ideas > 0);
     const total = list.reduce((a, c) => a + c.ideas, 0) || 1;
     const spec = el('div', 'aat-spectrum', cl);
@@ -603,8 +586,8 @@ export class Overlay {
       const row = el('div', 'aat-leg', legend);
       el('span', 'aat-leg-dot', row).style.background = color;
       el('span', 'aat-leg-name', row, c.name);
-      el('span', 'aat-leg-val', row, `${Math.round((c.ideas / total) * 100)} %`);
-      row.title = `${c.ideas} ${c.ideas === 1 ? 'Idee' : 'Ideen'} · dorthin fliegen`;
+      el('span', 'aat-leg-val', row, `${Math.round((c.ideas / total) * 100)}%`);
+      row.title = `${c.ideas} ${c.ideas === 1 ? 'idea' : 'ideas'} · fly to cluster`;
       const hi = (on) => {
         seg.classList.toggle('is-hot', on);
         spec.classList.toggle('has-hot', on);
@@ -616,14 +599,14 @@ export class Overlay {
       }
     }
 
-    const hubs = this._section(b, 'Am meisten verbunden');
+    const hubs = this._section(b, 'Most connected');
     for (const p of s.mostConnected) this._leaderRow(hubs, p.name, String(p.degree), () => this.view.openPath(p.path));
 
-    const rec = this._section(b, 'Zuletzt bearbeitet');
+    const rec = this._section(b, 'Recently edited');
     for (const p of s.recent) this._leaderRow(rec, p.name, ago(p.mtime), () => this.view.openPath(p.path));
   }
 
-  // Farbwahl: pywal-Akzent, die sieben Graph-Töne, eine eigene Farbe
+  // Offer the accent, palette swatches and a custom color.
   _swatches() {
     const plugin = this.view.plugin;
     const box = this.root.ownerDocument.createElement('div');
@@ -639,13 +622,13 @@ export class Overlay {
       const sw = el('span', 'aat-sw', box);
       sw.dataset.token = t;
       sw.style.background = plugin.chartColor(t);
-      sw.setAttribute('aria-label', t === 'accent' ? 'Akzentfarbe des Themes' : `Graph-Farbe ${Number(t[1]) + 1}`);
+      sw.setAttribute('aria-label', t === 'accent' ? 'Theme accent color' : `Graph color ${Number(t[1]) + 1}`);
       sw.classList.toggle('is-on', t === cur);
       sw.addEventListener('click', () => pick(t));
     }
     const custom = el('label', 'aat-sw aat-sw-custom', box);
     custom.dataset.token = 'custom';
-    custom.setAttribute('aria-label', 'Eigene Farbe');
+    custom.setAttribute('aria-label', 'Custom color');
     custom.classList.toggle('is-on', cur.startsWith('#'));
     if (cur.startsWith('#')) custom.style.background = cur;
     const input = el('input', '', custom);
@@ -674,7 +657,7 @@ export class Overlay {
     const C = 140, R0 = 74, LEN = 46;
     const n = days.length;
     const max = Math.max(1, ...days.map((d) => d.edited.length));
-    // Lücke oben = jetzt; im Uhrzeigersinn vom ältesten Tag bis heute
+    // The top gap marks the present. Days run clockwise from oldest to newest.
     const ang = (i) => ((-90 + 7 + (i / (n - 1)) * 346) * Math.PI) / 180;
     const pt = (a, r) => [C + Math.cos(a) * r, C + Math.sin(a) * r];
     node('circle', { cx: C, cy: C, r: R0, class: 'aat-ring-base' });
@@ -700,14 +683,14 @@ export class Overlay {
         const [x, y] = pt(a, R0 - 7);
         node('circle', { cx: x, cy: y, r: Math.min(3.2, 1.1 + Math.sqrt(d.created) * 0.7), class: 'aat-tick-new' }, g);
       }
-      // Monatsnamen am Monatsanfang
+      // Label the first day of each month.
       const date = new Date(d.t);
       if (date.getDate() === 1) {
         const [x, y] = pt(a, R0 + LEN + 17);
         const t = node('text', { x, y, class: 'aat-ring-month', 'text-anchor': 'middle', 'dominant-baseline': 'middle' });
         t.textContent = MONTHS[date.getMonth()];
       }
-      // breite, unsichtbare Trefferfläche
+      // Widen the invisible hit target.
       const [hx1, hy1] = pt(a, R0 - 12);
       const [hx2, hy2] = pt(a, R0 + LEN + 6);
       const hit = node('line', { x1: hx1, y1: hy1, x2: hx2, y2: hy2, class: 'aat-tick-hit' }, g);
@@ -720,11 +703,11 @@ export class Overlay {
       });
       this.ticks.push(g);
     });
-    // Mitte: Woche, beim Darüberfahren der Tag
+    // The center shows the weekly total or the day under the pointer.
     const mid = (this.ringMid = el('div', 'aat-ring-mid', wrap));
     const week = days.slice(-7).reduce((a, d) => a + d.edited.length, 0);
     const created = days.reduce((a, d) => a + d.created, 0);
-    this.ringDefault = [String(week), 'bearbeitet diese Woche', `${created} neu in 12 Wochen`];
+    this.ringDefault = [String(week), 'edited this week', `${created} created in 12 weeks`];
     this._ringFocus(null, null);
   }
 
@@ -734,7 +717,7 @@ export class Overlay {
     mid.empty();
     this.ticks?.forEach((t) => t.classList.toggle('is-hover', t === g));
     const [a, b, c] = d
-      ? [String(d.edited.length), `bearbeitet · ${WEEKDAYS[new Date(d.t).getDay()]}, ${fmtDay(d.t)}`, d.created ? `${d.created} neu angelegt` : '']
+      ? [String(d.edited.length), `edited · ${WEEKDAYS[new Date(d.t).getDay()]}, ${fmtDay(d.t)}`, d.created ? `${d.created} created` : '']
       : this.ringDefault;
     el('div', 'aat-ring-num', mid, a);
     el('div', 'aat-ring-lbl', mid, b);
@@ -747,16 +730,16 @@ export class Overlay {
     box.empty();
     box.classList.toggle('is-open', !!d);
     if (!d) {
-      el('div', 'aat-note', box, 'Strich = bearbeitete Notizen an dem Tag, Punkt innen = neu angelegt. Klick auf einen Tag zeigt seine Notizen.');
+      el('div', 'aat-note', box, 'Each bar shows how many notes you edited that day. An inner dot marks new notes. Select a day to see its notes.');
       return;
     }
     el('div', 'aat-day-head', box, `${WEEKDAYS[new Date(d.t).getDay()]}, ${fmtDay(d.t)}`);
-    if (!d.edited.length) el('div', 'aat-note', box, 'An diesem Tag wurde nichts bearbeitet.');
+    if (!d.edited.length) el('div', 'aat-note', box, 'No notes were edited that day.');
     for (const p of d.edited.slice(0, 12)) {
       const t = new Date(p.mtime);
       this._leaderRow(box, p.name, `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`, () => this.view.openPath(p.path));
     }
-    if (d.edited.length > 12) el('div', 'aat-note', box, `und ${d.edited.length - 12} weitere`);
+    if (d.edited.length > 12) el('div', 'aat-note', box, `and ${d.edited.length - 12} more`);
   }
 
   async _runSearch(q) {
@@ -771,7 +754,7 @@ export class Overlay {
     const b = this.body;
     b.empty();
     if (!results.length) {
-      el('div', 'aat-noresult', b, 'Nichts gefunden.');
+      el('div', 'aat-noresult', b, 'No results found.');
       return;
     }
     const list = el('div', 'aat-results', b);
