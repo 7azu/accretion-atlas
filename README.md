@@ -24,3 +24,7 @@ npm run build
 For a manual installation, copy the three files in `dist/` into the vault's plugin directory under `accretion-atlas/`, reload Obsidian, and enable **Accretion Atlas** in Community plugins.
 
 For a GitHub release, use the exact version from `manifest.json` as its tag and attach `dist/main.js`, `dist/manifest.json`, and `dist/styles.css` individually. The build embeds license notices for Three.js and the D3 libraries in the JavaScript bundle.
+
+## Credits
+
+The accretion disk shader adapts plasma and column integration from [second-brain-black-hole](https://github.com/williamwasen/second-brain-black-hole). Its MIT license is included in the distributed plugin.

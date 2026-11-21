@@ -7,6 +7,8 @@ const notices = await Promise.all(libraries.map(async (name) =>
   name + '\n' + await readFile('node_modules/' + name + '/LICENSE', 'utf8')
 ));
 
+notices.push('second-brain-black-hole\n' + await readFile('licenses/second-brain-black-hole.txt', 'utf8'));
+
 await build({
   entryPoints: ['src/main.js'],
   outfile: 'dist/main.js',
