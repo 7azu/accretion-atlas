@@ -4,6 +4,8 @@ Explore your notes as stars orbiting a black hole. The global galaxy groups note
 
 Open the galaxy from the ribbon or search for **Open global galaxy** or **Open local galaxy** in the command palette. Hover over a star to preview its note. The dashboard includes vault activity and full-text search.
 
+[Watch the 19-second galaxy demo (MP4)](media/accretion-atlas.mp4)
+
 ## Colors
 
 By default the graph uses your Obsidian theme. In **Settings → Accretion Atlas**, enable **Use pywal colors** to read RGB triplets from the CSS variables `--ctp-accent` and `--wal-graph-1` through `--wal-graph-7`. Enable your pywal CSS snippet in Obsidian for these variables to be available. Changes apply to open views. The dashboard also lets you select a chart color.
