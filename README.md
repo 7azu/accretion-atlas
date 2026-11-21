@@ -2,6 +2,8 @@
 
 Explore your notes as stars orbiting a black hole. The global galaxy groups notes by their top-level folder. Notes at the vault root share their own group. The local galaxy follows the active note and shows its linked neighbors up to two steps away. Headings and linked attachments appear alongside notes.
 
+[![Animated preview of the 3D galaxy of notes](media/accretion-atlas-preview.webp)](media/accretion-atlas.mp4)
+
 Open the galaxy from the ribbon or search for **Open global galaxy** or **Open local galaxy** in the command palette. Hover over a star to preview its note. The dashboard includes vault activity and full-text search.
 
 [Watch the 19-second galaxy demo (MP4)](media/accretion-atlas.mp4)
