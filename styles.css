@@ -1,0 +1,890 @@
+
+.workspace-leaf-content[data-type="accretion-atlas"] .view-content.aat-view {
+  padding: 0;
+  overflow: hidden;
+}
+
+.aat-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #000;
+  color: rgba(255, 255, 255, 0.92);
+  font-family: var(--font-interface);
+  user-select: none;
+  outline: none;
+}
+
+.aat-canvas {
+  position: absolute;
+  inset: 0;
+}
+.aat-canvas canvas {
+  display: block;
+  cursor: grab;
+}
+.aat-canvas canvas:active {
+  cursor: grabbing;
+}
+.aat-root.is-hovering .aat-canvas canvas {
+  cursor: pointer;
+}
+
+/* ---- Beschriftungen ---------------------------------------------------------------------- */
+.aat-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.aat-clabel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: auto;
+  cursor: pointer;
+  text-shadow: 0 0 6px #000, 0 0 14px #000;
+  transition: opacity 0.4s;
+  will-change: transform;
+}
+.aat-cname {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+.aat-csub {
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.42);
+  margin-top: 1px;
+}
+.aat-clabel:hover .aat-cname {
+  color: #fff;
+}
+.aat-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 2px;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+}
+
+/* ---- Kopfzeile ---------------------------------------------------------------------------- */
+.aat-top {
+  position: absolute;
+  top: 14px;
+  left: 18px;
+  right: 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.aat-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.aat-sub {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.38);
+  margin-top: 1px;
+}
+.aat-pill {
+  pointer-events: auto;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: rgba(22, 22, 24, 0.66);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(10px);
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+.aat-pill:hover {
+  color: #fff;
+  border-color: rgba(var(--aat-acc), 0.55);
+  background: rgba(var(--aat-acc), 0.12);
+}
+.aat-pill-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.aat-root.dash-open .aat-pill-center {
+  border-color: rgba(var(--aat-acc), 0.6);
+  color: #fff;
+}
+.aat-root.is-local .aat-pill-center {
+  display: none;
+}
+
+/* ---- Begrüßung / Infos links --------------------------------------------------------------- */
+.aat-greet,
+.aat-local {
+  position: absolute;
+  top: 62px;
+  left: 22px;
+  width: min(290px, 42%);
+  transition: opacity 0.35s;
+}
+.aat-root.is-local .aat-greet,
+.aat-root:not(.is-local) .aat-local,
+.aat-root.dash-open .aat-greet,
+.aat-root.is-away .aat-greet {
+  opacity: 0;
+  pointer-events: none;
+}
+.aat-greet h2 {
+  margin: 0 0 3px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+.aat-since {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.4);
+}
+.aat-news {
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.72);
+  margin: 12px 0 18px;
+}
+.aat-local-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.aat-local-title:hover {
+  color: rgb(var(--aat-acc));
+}
+
+.aat-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+
+/* ---- Tooltip ------------------------------------------------------------------------------- */
+.aat-tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  pointer-events: none;
+  width: max-content;
+  max-width: 300px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  background: rgba(10, 10, 12, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.aat-tip.is-rich {
+  width: 320px;
+  max-width: 320px;
+  padding: 11px 14px 0;
+}
+.aat-tip-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aat-tip-sub {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+}
+/* Vorschau: gerenderter Anfang der Notiz, unten weich ausgeblendet */
+.aat-pv {
+  display: none;
+}
+.aat-tip.is-rich .aat-pv {
+  display: block;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  max-height: 230px;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.78);
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 46px), transparent);
+  mask-image: linear-gradient(#000 calc(100% - 46px), transparent);
+  padding-bottom: 14px;
+}
+.aat-pv > :first-child {
+  margin-top: 0;
+}
+.aat-pv h1, .aat-pv h2, .aat-pv h3, .aat-pv h4, .aat-pv h5, .aat-pv h6 {
+  margin: 0.6em 0 0.25em;
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+.aat-pv p, .aat-pv ul, .aat-pv ol, .aat-pv pre, .aat-pv table, .aat-pv blockquote, .aat-pv .callout {
+  margin: 0 0 0.5em;
+}
+.aat-pv pre, .aat-pv code {
+  font-size: 10.5px;
+}
+.aat-pv table {
+  font-size: 10.5px;
+}
+.aat-pv img,
+.aat-pv-img {
+  display: block;
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 6px;
+}
+
+/* ---- Werkzeugleiste ------------------------------------------------------------------------ */
+.aat-toolbar {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(18, 18, 20, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+}
+.aat-tb {
+  width: 30px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+}
+.aat-tb:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+.aat-tb svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ---- Übersicht (Seitenpanel rechts) -------------------------------------------------------- */
+.aat-root {
+  --aat-panel: clamp(320px, 31%, 430px);
+}
+/* Galaxie und Beschriftungen rücken nach links, das Loch bleibt in der freien Fläche mittig */
+.aat-canvas,
+.aat-labels {
+  transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.aat-root.dash-open .aat-canvas,
+.aat-root.dash-open .aat-labels {
+  transform: translateX(calc(var(--aat-panel) / -2));
+}
+.aat-dash {
+  --aat-chart: rgb(var(--aat-acc));
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--aat-panel);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 22px 0 24px;
+  background: linear-gradient(90deg, rgba(6, 6, 8, 0.55), rgba(8, 8, 10, 0.86) 28%);
+  backdrop-filter: blur(14px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(28px);
+  transition: opacity 0.35s, transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* feine Kante links: nur ein Lichtstrich, kein Rahmen */
+.aat-dash::before {
+  content: '';
+  position: absolute;
+  top: 8%;
+  bottom: 8%;
+  left: 0;
+  width: 1px;
+  background: linear-gradient(transparent, rgba(255, 255, 255, 0.16) 30%, rgba(255, 255, 255, 0.16) 70%, transparent);
+}
+.aat-dash.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+.aat-root.dash-open .aat-pill-center {
+  background: rgba(255, 255, 255, 0.1);
+}
+.aat-dash-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.aat-dash-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.aat-dash-date {
+  margin-top: 2px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.38);
+}
+.aat-close {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+}
+.aat-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+.aat-close svg,
+.aat-search-icon svg {
+  width: 14px;
+  height: 14px;
+}
+/* Suche: nur eine Linie darunter */
+.aat-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 16px 0 4px;
+  padding: 0 0 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  transition: border-color 0.2s;
+  cursor: text;
+}
+.aat-search:focus-within {
+  border-color: var(--aat-chart);
+}
+.aat-search-icon {
+  display: flex;
+  color: rgba(255, 255, 255, 0.38);
+}
+.aat-search input,
+.aat-search input:focus,
+.aat-search input:hover {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  padding: 0;
+  height: auto;
+  background: transparent;
+  font-size: 12px;
+  font-family: inherit;
+  color: #fff;
+}
+.aat-search input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+.aat-dash-body {
+  flex: 1;
+  overflow-y: auto;
+  margin-right: -12px;
+  padding: 0 12px 24px 0;
+  scrollbar-width: thin;
+}
+.aat-sec {
+  padding-top: 20px;
+}
+.aat-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.aat-sec-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+}
+.aat-note {
+  font-size: 10px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.36);
+}
+
+/* Farbwahl: kleine Sterne */
+.aat-swatches {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.aat-sw {
+  position: relative;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.aat-sw:hover {
+  opacity: 1;
+  transform: scale(1.25);
+}
+.aat-sw.is-on {
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.9), 0 0 0 3px rgba(255, 255, 255, 0.7), 0 0 10px currentColor;
+}
+.aat-sw-custom {
+  margin-left: 3px;
+  background: conic-gradient(from 90deg, #e8a87c, #d4a5c9, #9fb7d8, #a5d4b8, #e8d18c, #e8a87c);
+}
+.aat-sw-custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+}
+
+/* Aktivitätsring */
+.aat-ring {
+  position: relative;
+  width: min(100%, 280px);
+  margin: 0 auto;
+  aspect-ratio: 1;
+}
+.aat-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.aat-ring-base {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 0.6;
+}
+.aat-ring-outer {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.05);
+  stroke-width: 0.6;
+  stroke-dasharray: 1 5;
+}
+.aat-ring-now {
+  fill: var(--aat-chart);
+  filter: drop-shadow(0 0 3px var(--aat-chart));
+}
+.aat-tick-bar {
+  stroke: var(--aat-chart);
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke-width 0.15s;
+}
+.aat-tick.is-today .aat-tick-bar {
+  filter: drop-shadow(0 0 3px var(--aat-chart));
+}
+.aat-tick-zero {
+  fill: rgba(255, 255, 255, 0.16);
+}
+.aat-tick-new {
+  fill: rgba(255, 255, 255, 0.78);
+}
+.aat-tick-hit {
+  stroke: transparent;
+  stroke-width: 9;
+  cursor: pointer;
+}
+.aat-tick.is-hover .aat-tick-bar,
+.aat-tick.is-picked .aat-tick-bar {
+  stroke: #fff;
+  stroke-width: 3;
+  stroke-opacity: 1;
+}
+.aat-tick.is-hover .aat-tick-zero,
+.aat-tick.is-picked .aat-tick-zero {
+  fill: #fff;
+}
+.aat-ring-month {
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  fill: rgba(255, 255, 255, 0.34);
+  font-family: var(--font-interface);
+}
+.aat-ring-mid {
+  position: absolute;
+  inset: 29%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+.aat-ring-num {
+  font-size: 30px;
+  font-weight: 300;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+.aat-ring-lbl {
+  white-space: nowrap;
+  margin-top: 5px;
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.55);
+}
+.aat-ring-sub {
+  white-space: nowrap;
+  margin-top: 2px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.32);
+}
+.aat-daylist {
+  margin-top: 6px;
+}
+.aat-day-head {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--aat-chart);
+}
+
+/* Bestand: Zahlen als Zeile */
+.aat-nums {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.aat-numcell {
+  padding: 0 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+.aat-numcell:first-child {
+  padding-left: 0;
+  border-left: none;
+}
+.aat-big {
+  font-size: 22px;
+  font-weight: 300;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.aat-small {
+  margin-top: 2px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.aat-nums + .aat-note {
+  margin-top: 10px;
+}
+
+/* Cluster: ein Spektrum, darunter die Legende */
+.aat-spectrum {
+  display: flex;
+  gap: 2px;
+  height: 7px;
+}
+.aat-spectrum i {
+  flex-basis: 0;
+  min-width: 3px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.aat-spectrum.has-hot i:not(.is-hot) {
+  opacity: 0.25;
+}
+.aat-spectrum i.is-hot {
+  transform: scaleY(1.6);
+}
+.aat-legend {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 16px;
+  margin-top: 10px;
+}
+.aat-leg {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 0;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+}
+.aat-leg:hover {
+  color: #fff;
+}
+.aat-leg-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.aat-leg-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aat-leg-val {
+  flex: none;
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.35);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Listen mit Punktlinie */
+.aat-lead {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.74);
+  cursor: pointer;
+}
+.aat-lead:hover {
+  color: #fff;
+}
+.aat-lead:hover .aat-lead-val {
+  color: var(--aat-chart);
+}
+.aat-lead-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aat-lead-dots {
+  flex: 1;
+  min-width: 12px;
+  border-bottom: 1px dotted rgba(255, 255, 255, 0.16);
+  transform: translateY(-3px);
+}
+.aat-lead-val {
+  flex: none;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.38);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Suchergebnisse */
+.aat-results {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+}
+.aat-result {
+  padding: 8px 0 8px 10px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.aat-result:hover,
+.aat-result.is-active {
+  border-left-color: var(--aat-chart);
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), transparent);
+}
+.aat-r-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.aat-r-cl {
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.38);
+  margin-bottom: 2px;
+}
+.aat-r-snip {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.55);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.aat-r-snip mark {
+  background: none;
+  color: #fff;
+  border-bottom: 1px solid var(--aat-chart);
+}
+.aat-noresult {
+  padding: 18px 0 6px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* schmale Ansicht (Seitenleiste): Panel über die ganze Breite */
+@container (max-width: 640px) {
+  .aat-root {
+    --aat-panel: 100%;
+  }
+  .aat-root.dash-open .aat-canvas,
+  .aat-root.dash-open .aat-labels {
+    transform: none;
+  }
+}
+.workspace-leaf-content[data-type="accretion-atlas"] .view-content.aat-view {
+  container-type: size;
+}
+@container (max-width: 520px) {
+  .aat-greet,
+  .aat-local {
+    width: calc(100% - 44px);
+  }
+  .aat-greet .aat-up,
+  .aat-greet .aat-section-title {
+    display: none;
+  }
+}
+
+/* Namensschilder naher Notizen */
+.aat-nlabel {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+  cursor: pointer;
+  text-shadow: 0 0 4px #000, 0 0 10px #000;
+  transition: opacity 0.3s;
+}
+.aat-nlabel:hover {
+  color: rgb(var(--aat-acc));
+}
+
+/* ---- Start-Animation: Oberfläche kommt nach der Szene ------------------------------------- */
+.aat-root.is-intro .aat-top,
+.aat-root.is-intro .aat-greet,
+.aat-root.is-intro .aat-local,
+.aat-root.is-intro .aat-toolbar,
+.aat-root.is-intro .aat-labels {
+  opacity: 0;
+  pointer-events: none;
+}
+.aat-root.is-intro .aat-top,
+.aat-root.is-intro .aat-greet,
+.aat-root.is-intro .aat-local {
+  transform: translateY(-6px);
+}
+.aat-root.is-intro .aat-toolbar {
+  transform: translate(-50%, 8px);
+}
+.aat-root.is-intro-done .aat-top,
+.aat-root.is-intro-done .aat-greet,
+.aat-root.is-intro-done .aat-local,
+.aat-root.is-intro-done .aat-toolbar,
+.aat-root.is-intro-done .aat-labels {
+  transition: opacity 0.9s cubic-bezier(0.22, 1, 0.36, 1), transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.aat-root.is-intro-done .aat-labels { transition-delay: 0s; }
+.aat-root.is-intro-done .aat-top { transition-delay: 0.15s; }
+.aat-root.is-intro-done .aat-greet,
+.aat-root.is-intro-done .aat-local { transition-delay: 0.3s; }
+.aat-root.is-intro-done .aat-toolbar { transition-delay: 0.42s; }
+@media (prefers-reduced-motion: reduce) {
+  .aat-root.is-intro .aat-top,
+  .aat-root.is-intro .aat-greet,
+  .aat-root.is-intro .aat-local,
+  .aat-root.is-intro .aat-toolbar {
+    transform: none;
+  }
+}
+
+/* ---- Schwarzes Loch: Schrift auf dem Bogen, Orbit-Ring beim Darüberfahren ------------------- */
+.aat-hole {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  transition: opacity 0.4s;
+}
+.aat-hole svg {
+  display: block;
+  overflow: visible;
+}
+.aat-hole-text {
+  font-family: var(--font-interface);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  fill: rgba(255, 244, 232, 0.66);
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 6px rgba(0, 0, 0, 0.7));
+  transition: fill 0.3s, letter-spacing 0.4s;
+}
+.aat-root.is-local .aat-hole-text {
+  letter-spacing: 0.16em;
+  text-transform: none;
+  font-size: 10px;
+}
+.aat-hole-ring {
+  fill: none;
+  stroke: rgba(255, 236, 214, 0.55);
+  stroke-width: 0.8;
+  stroke-dasharray: 1 6;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity 0.35s;
+  animation: aat-hole-spin 40s linear infinite;
+}
+.aat-root.is-hole-hover .aat-hole-ring {
+  opacity: 1;
+}
+.aat-root.is-hole-hover .aat-hole-text {
+  fill: rgba(255, 250, 242, 0.95);
+  letter-spacing: 0.5em;
+}
+.aat-root.is-local.is-hole-hover .aat-hole-text {
+  letter-spacing: 0.2em;
+}
+.aat-root.is-hole-hover .aat-canvas canvas {
+  cursor: pointer;
+}
+@keyframes aat-hole-spin {
+  to { transform: rotate(1turn); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .aat-hole-ring { animation: none; }
+}
+
