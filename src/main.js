@@ -238,13 +238,20 @@ class GalaxyView extends ItemView {
 
 export default class AccretionAtlas extends Plugin {
   async onload() {
-    // Keep the previous visit in device-local storage. Frequent updates to a synced settings file can cause merge conflicts.
-    this.prevVisit = Number(this.loadLocal('lastVisit')) || 0;
+    this.settings = Object.assign({ chartColor: 'accent', usePywal: false }, await this.loadData());
+    this.pendingSave = Promise.resolve();
+    if (this.settings.lastVisit == null) {
+      const legacyVisit = Number(this.app.loadLocalStorage?.('accretion-atlas-lastVisit')
+        ?? window.localStorage.getItem(this.app.vault.getName() + ':accretion-atlas-lastVisit'));
+      if (Number.isFinite(legacyVisit) && legacyVisit > 0) {
+        this.settings.lastVisit = legacyVisit;
+        await this.saveSettings();
+      }
+    }
+    this.prevVisit = Number(this.settings.lastVisit) || 0;
     this.registerInterval(window.setInterval(() => {
       if (this.views().length) this.rememberVisit();
     }, 5 * 60 * 1000));
-    // Chart colors use the accent, a palette entry (p0 through p6) or a custom hex value.
-    this.settings = Object.assign({ chartColor: 'accent', usePywal: false }, await this.loadData());
     this.colors = readColors(this.settings.usePywal);
     this.addSettingTab(new ColorSettings(this.app, this));
     this.model = null;
@@ -298,22 +305,18 @@ export default class AccretionAtlas extends Plugin {
 
   async setChartColor(token) {
     this.settings.chartColor = token;
-    await this.saveData(this.settings);
+    await this.saveSettings();
   }
 
   rememberVisit() {
-    this.saveLocal('lastVisit', String(Date.now()));
+    this.settings.lastVisit = Date.now();
+    return this.saveSettings();
   }
 
-  loadLocal(key) {
-    const k = 'accretion-atlas-' + key;
-    return this.app.loadLocalStorage ? this.app.loadLocalStorage(k) : window.localStorage.getItem(this.app.vault.getName() + ':' + k);
-  }
-
-  saveLocal(key, value) {
-    const k = 'accretion-atlas-' + key;
-    if (this.app.saveLocalStorage) this.app.saveLocalStorage(k, value);
-    else window.localStorage.setItem(this.app.vault.getName() + ':' + k, value);
+  saveSettings() {
+    const save = this.pendingSave.then(() => this.saveData(this.settings));
+    this.pendingSave = save.catch(error => console.error('Accretion Atlas could not save plugin data', error));
+    return save;
   }
 
   views() {
@@ -417,7 +420,7 @@ class ColorSettings extends PluginSettingTab {
       .addToggle((toggle) => toggle.setValue(this.plugin.settings.usePywal).onChange(async (enabled) => {
         this.plugin.settings.usePywal = enabled;
         this.plugin.refreshColors();
-        await this.plugin.saveData(this.plugin.settings);
+        await this.plugin.saveSettings();
       }));
   }
 }
