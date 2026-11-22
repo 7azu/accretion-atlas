@@ -10,7 +10,7 @@ Open the galaxy from the ribbon or search for **Open global galaxy** or **Open l
 
 ## Colors
 
-By default the graph uses your Obsidian theme. In **Settings → Accretion Atlas**, enable **Use pywal colors** to read RGB triplets from the CSS variables `--ctp-accent` and `--wal-graph-1` through `--wal-graph-7`. Enable your pywal CSS snippet in Obsidian for these variables to be available. Changes apply to open views. The dashboard also lets you select a chart color.
+By default the graph uses your Obsidian theme. In **Settings → Accretion Atlas**, enable **Use pywal colors** to read RGB triplets from the CSS variables `--ctp-accent` and `--wal-graph-1` through `--wal-graph-7`. Enable your pywal CSS snippet in Obsidian for these variables to be available. Changes apply to open views. With pywal colors off, all nebulae share one muted gray, which you can change under **Nebula color**; with them on, each cluster's nebula takes its pywal color. The dashboard also lets you select a chart color.
 
 ## Build and install
 

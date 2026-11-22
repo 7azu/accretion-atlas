@@ -95,6 +95,7 @@ class GalaxyView extends ItemView {
         onHole: () => this.galaxy?.home(),
         onHoleHover: (on) => this.overlay.setHoleHover(on),
         colors: this.plugin.colors,
+        nebulaColor: () => this.plugin.nebulaColor(),
         onOpenNode: (n, newTab) => this.openNode(n, newTab),
         onHover: (n, m) => this.overlay.showTip(n, m),
         onFrame: (g) => this.overlay.frame(g),
@@ -236,9 +237,12 @@ class GalaxyView extends ItemView {
   }
 }
 
+// Muted warm gray that matches the accretion disk.
+const DEFAULT_NEBULA = '#958b84';
+
 export default class AccretionAtlas extends Plugin {
   async onload() {
-    this.settings = Object.assign({ chartColor: 'accent', usePywal: false }, await this.loadData());
+    this.settings = Object.assign({ chartColor: 'accent', usePywal: false, nebulaColor: DEFAULT_NEBULA }, await this.loadData());
     this.pendingSave = Promise.resolve();
     if (this.settings.lastVisit == null) {
       const legacyVisit = Number(this.app.loadLocalStorage?.('accretion-atlas-lastVisit')
@@ -302,6 +306,22 @@ export default class AccretionAtlas extends Plugin {
     if (rgb) return `rgb(${rgb.map((v) => Math.round(v * 255)).join(', ')})`;
     return /^#[0-9a-f]{6}$/i.test(token) ? token : `rgb(${c.accent.map((v) => Math.round(v * 255)).join(', ')})`;
   }
+
+  // Fixed nebula color as [r, g, b] in 0..1, or null when the nebula uses the pywal cluster colors.
+  nebulaColor() {
+    if (this.settings.usePywal) return null;
+    const hex = /^#[0-9a-f]{6}$/i.test(this.settings.nebulaColor) ? this.settings.nebulaColor : DEFAULT_NEBULA;
+    return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  }
+
+  setNebulaColor(hex) {
+    this.settings.nebulaColor = hex;
+    for (const view of this.views()) view.galaxy?.refreshNebula();
+    this.saveSettingsSoon();
+  }
+
+  // The color picker fires continuously while dragging, so write data.json only after a pause.
+  saveSettingsSoon = debounce(() => this.saveSettings(), 800, true);
 
   async setChartColor(token) {
     this.settings.chartColor = token;
@@ -416,11 +436,22 @@ class ColorSettings extends PluginSettingTab {
     this.containerEl.empty();
     new Setting(this.containerEl)
       .setName('Use pywal colors')
-      .setDesc('Use the colors from your active pywal CSS snippet. If the snippet is unavailable, use theme colors.')
+      .setDesc('Use the colors from your active pywal CSS snippet, also for the nebulae. If the snippet is unavailable, use theme colors. When off, the nebulae use one fixed color.')
       .addToggle((toggle) => toggle.setValue(this.plugin.settings.usePywal).onChange(async (enabled) => {
         this.plugin.settings.usePywal = enabled;
         this.plugin.refreshColors();
         await this.plugin.saveSettings();
+        this.display();
       }));
+    if (!this.plugin.settings.usePywal) {
+      new Setting(this.containerEl)
+        .setName('Nebula color')
+        .setDesc('Color of all nebulae while pywal colors are off.')
+        .addColorPicker((picker) => picker.setValue(this.plugin.settings.nebulaColor).onChange((hex) => this.plugin.setNebulaColor(hex)))
+        .addExtraButton((button) => button.setIcon('rotate-ccw').setTooltip('Reset').onClick(() => {
+          this.plugin.setNebulaColor(DEFAULT_NEBULA);
+          this.display();
+        }));
+    }
   }
 }

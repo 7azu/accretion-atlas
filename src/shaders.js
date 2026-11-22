@@ -525,15 +525,47 @@ void main() {
 }
 `;
 
-// A comet tail traces a fixed interval of mean anomaly behind the head. Its spatial length increases near periapsis where the comet travels faster.
+// Comets (look adapted from second-brain-black-hole): a short tail behind the head that thins and fades toward its end
+// (width 0.35 + 1.5 f px, brightness 0.8 f with f = (1 - s)^1.7). The tail is a ribbon with two vertices per orbit sample
+// (aS = 0 at the head, 1 at the tail end; aSide = ±1). The shader places the samples on the Kepler orbit at mean anomaly
+// uM - uTail aS, so every tail spans the same time, and widens the ribbon across the orbit in screen space.
+// Below one pixel the ribbon stays one pixel wide and dims instead, which keeps the energy constant and avoids flicker.
 export const COMET_VERT = /* glsl */ `
-attribute float aM;
+attribute float aS;
+attribute float aSide;
 uniform float uM;
+uniform float uA;
+uniform float uE;
+uniform vec3 uP;
+uniform vec3 uQ;
+uniform float uTail;
+uniform vec2 uRes;      // Drawing buffer size in device pixels
+uniform float uDpr;     // Device pixels per CSS pixel
 varying float vA;
+varying float vD;
+varying float vHalf;
+vec3 orbitPos(float M) {
+  float E = M;
+  for (int k = 0; k < 5; k++) E -= (E - uE * sin(E) - M) / (1.0 - uE * cos(E));
+  return uP * (uA * (cos(E) - uE)) + uQ * (uA * sqrt(1.0 - uE * uE) * sin(E));
+}
 void main() {
-  float d = mod(uM - aM + 12.566370, 6.283185);
-  vA = exp(-d * 1.5) * (1.0 - smoothstep(3.0, 5.0, d));
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  float M = uM - uTail * aS;
+  vec4 c = projectionMatrix * modelViewMatrix * vec4(orbitPos(M), 1.0);
+  vec4 c2 = projectionMatrix * modelViewMatrix * vec4(orbitPos(M + 0.01), 1.0);
+  if (c.w <= 1.0 || c2.w <= 1.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); vA = 0.0; vD = 0.0; vHalf = 0.0; return; }
+  vec2 h = uRes * 0.5;
+  vec2 d = c2.xy / c2.w * h - c.xy / c.w * h;
+  vec2 n = length(d) > 1e-4 ? normalize(vec2(-d.y, d.x)) : vec2(0.0, 1.0);
+  float f = pow(1.0 - aS, 1.7);
+  float w = (0.35 + 1.5 * f) * uDpr;
+  float we = max(w, 1.0);
+  float hw = we * 0.5 + 1.0;     // One extra pixel for antialiasing
+  vD = aSide * hw;
+  vHalf = we * 0.5;
+  vA = f * 0.8 * (w / we);
+  c.xy += n * (aSide * hw) / h * c.w;
+  gl_Position = c;
 }
 `;
 
@@ -542,8 +574,46 @@ uniform vec3 uColor;
 uniform float uBright;
 uniform float uIntro;
 varying float vA;
+varying float vD;
+varying float vHalf;
 void main() {
-  gl_FragColor = vec4(uColor * vA * uBright * uIntro, 1.0);
+  float cov = clamp(vHalf + 0.5 - abs(vD), 0.0, 1.0);
+  gl_FragColor = vec4(uColor * vA * cov * uBright * uIntro, 1.0);
+}
+`;
+
+// Comet head: a soft 14 CSS px radial glow and a small bright core.
+export const COMET_HEAD_VERT = /* glsl */ `
+attribute float aBright;
+uniform float uDpr;
+varying float vB;
+varying float vPS;
+void main() {
+  vec4 c = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vB = c.w > 1.0 ? aBright : 0.0;
+  vPS = 14.0 * uDpr;
+  gl_PointSize = vPS;
+  gl_Position = c.w > 1.0 ? c : vec4(2.0, 2.0, 2.0, 1.0);
+}
+`;
+
+export const COMET_HEAD_FRAG = /* glsl */ `
+uniform vec3 uColor;
+uniform float uIntro;
+uniform float uDpr;
+varying float vB;
+varying float vPS;
+void main() {
+  float r = length(gl_PointCoord * 2.0 - 1.0);      // 0 at the center, 1 at the edge
+  if (r >= 1.0) discard;
+  // Gradient stops as in the reference: 0 -> 0.67, 0.28 -> 0.44, 0.58 -> 0.15, 1 -> 0
+  float glow = r < 0.28 ? mix(0.67, 0.44, r / 0.28)
+             : r < 0.58 ? mix(0.44, 0.15, (r - 0.28) / 0.30)
+             : mix(0.15, 0.0, (r - 0.58) / 0.42);
+  float px = r * vPS * 0.5;                          // Pixels from the center
+  float core = clamp(1.2 * uDpr + 0.5 - px, 0.0, 1.0);
+  float a = (glow + core) * vB * uIntro;
+  gl_FragColor = vec4(uColor * a, 1.0);
 }
 `;
 

@@ -8,7 +8,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { forceSimulation, forceLink, forceManyBody } from 'd3-force-3d';
 import {
   BH_VERT, BH_FRAG, SKY_VERT, SKY_FRAG, STAR_VERT, STAR_FRAG, DUST_VERT,
-  BG_VERT, BG_FRAG, LINE_VERT, LINE_FRAG, COMET_VERT, COMET_FRAG, NEB_VERT, NEB_FRAG,
+  BG_VERT, BG_FRAG, LINE_VERT, LINE_FRAG, COMET_VERT, COMET_FRAG, COMET_HEAD_VERT, COMET_HEAD_FRAG, NEB_VERT, NEB_FRAG,
 } from './shaders.js';
 
 // World units per Schwarzschild radius. The disk spans 3 to 12 radii and the ray tracer uses a bounding sphere of 14 radii.
@@ -115,6 +115,8 @@ export class Galaxy {
     this._fpsN = 0;
     this._v = new THREE.Vector3();
     this.uScale = { value: 1 };
+    this.uRes = { value: new THREE.Vector2(1, 1) }; // Drawing buffer size in device pixels, for comet tails
+    this.uDpr = { value: 1 };
     this._activeAt = performance.now();
     this._simUntil = 0;
     this.uTime = { value: 0 };
@@ -372,10 +374,30 @@ export class Galaxy {
   }
 
   _buildComets() {
+    // Look adapted from second-brain-black-hole: short fading tails and glowing heads instead of full orbit lines.
+    // The orbits remain slightly elliptical Kepler orbits.
     const R = rng(this.mode === 'local' ? 23 : 5);
     this.comets = [];
-    const count = this.mode === 'local' ? 4 : 7;
+    const count = this.mode === 'local' ? 6 : 13;
+    const STEPS = 28;
+    // Ribbon with two vertices per orbit sample, shared by all comets (each orbit lives in its uniforms).
+    const aS = new Float32Array((STEPS + 1) * 2), aSide = new Float32Array((STEPS + 1) * 2);
+    const idx = [];
+    for (let k = 0; k <= STEPS; k++) {
+      aS[k * 2] = aS[k * 2 + 1] = k / STEPS;
+      aSide[k * 2] = -1;
+      aSide[k * 2 + 1] = 1;
+      if (k < STEPS) idx.push(k * 2, k * 2 + 1, k * 2 + 2, k * 2 + 1, k * 2 + 3, k * 2 + 2);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array((STEPS + 1) * 6), 3));
+    g.setAttribute('aS', new THREE.BufferAttribute(aS, 1));
+    g.setAttribute('aSide', new THREE.BufferAttribute(aSide, 1));
+    g.setIndex(idx);
+    this.cometGeo = g;
     const heads = new Float32Array(count * 3);
+    const headBright = new Float32Array(count);
+    this.cometColor = new THREE.Color(1, 1, 1);
     for (let k = 0; k < count; k++) {
       const a = (this.mode === 'local' ? 560 : 640) + R() * 380;
       const e = 0.02 + R() * 0.12;
@@ -384,42 +406,29 @@ export class Galaxy {
       const w = R() * TAU;
       const P = new THREE.Vector3(Math.cos(w), Math.sin(w), 0).applyQuaternion(q); // XY reference plane
       const Q = new THREE.Vector3(-Math.sin(w), Math.cos(w), 0).applyQuaternion(q);
-      const N = 480;
-      const pos = new Float32Array(N * 3);
-      const aM = new Float32Array(N);
-      for (let i = 0; i < N; i++) {
-        const E = (i / N) * TAU;
-        const nu = 2 * Math.atan2(Math.sqrt(1 + e) * Math.sin(E / 2), Math.sqrt(1 - e) * Math.cos(E / 2));
-        const rr = (a * (1 - e * e)) / (1 + e * Math.cos(nu));
-        const p = P.clone().multiplyScalar(Math.cos(nu) * rr).addScaledVector(Q, Math.sin(nu) * rr);
-        pos.set([p.x, p.y, p.z], i * 3);
-        aM[i] = E - e * Math.sin(E);
-      }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      g.setAttribute('aM', new THREE.BufferAttribute(aM, 1));
+      const bright = 0.5 + R() * 0.5;
+      headBright[k] = bright;
       const mat = new THREE.ShaderMaterial({
         vertexShader: COMET_VERT, fragmentShader: COMET_FRAG,
         uniforms: {
-          uM: { value: 0 }, uColor: { value: new THREE.Color(1, 1, 1) }, uBright: { value: 0.45 + R() * 0.45 }, uIntro: this.uIntro,
+          uM: { value: 0 }, uA: { value: a }, uE: { value: e }, uP: { value: P }, uQ: { value: Q },
+          uTail: { value: 0.65 + R() * 0.7 }, uRes: this.uRes, uDpr: this.uDpr,
+          uColor: { value: this.cometColor }, uBright: { value: bright }, uIntro: this.uIntro,
         },
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
       });
-      const line = new THREE.LineLoop(g, mat);
-      line.frustumCulled = false;
-      line.renderOrder = 3;
-      this.scene.add(line);
+      const tail = new THREE.Mesh(g, mat);
+      tail.frustumCulled = false;
+      tail.renderOrder = 3;
+      this.scene.add(tail);
       this.comets.push({ a, e, P, Q, n: Math.sqrt(GM_COMET / (a * a * a)), M: R() * TAU, mat });
     }
     const hg = new THREE.BufferGeometry();
     hg.setAttribute('position', new THREE.BufferAttribute(heads, 3));
-    hg.setAttribute('aSize', new THREE.BufferAttribute(new Float32Array(count).fill(7), 1));
-    hg.setAttribute('aColor', new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3));
-    hg.setAttribute('aAlpha', new THREE.BufferAttribute(new Float32Array(count).fill(1), 1));
-    hg.setAttribute('aPhase', new THREE.BufferAttribute(new Float32Array(count).map(() => R()), 1));
+    hg.setAttribute('aBright', new THREE.BufferAttribute(headBright, 1));
     this.cometHeads = new THREE.Points(hg, new THREE.ShaderMaterial({
-      vertexShader: STAR_VERT, fragmentShader: STAR_FRAG,
-      uniforms: { uScale: this.uScale, uTime: this.uTime, uMinPx: { value: 2.5 }, uFocus: this.uFocus, uReveal: this.uReveal },
+      vertexShader: COMET_HEAD_VERT, fragmentShader: COMET_HEAD_FRAG,
+      uniforms: { uDpr: this.uDpr, uColor: { value: this.cometColor }, uIntro: this.uIntro },
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     }));
     this.cometHeads.frustumCulled = false;
@@ -541,6 +550,8 @@ export class Galaxy {
     const buf = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     const t = Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2);
     this.uScale.value = buf.y / (2 * t);
+    this.uRes.value.copy(buf);
+    this.uDpr.value = buf.y / Math.max(h, 1);
     this.cssScale = h / (2 * t);
   }
 
@@ -685,10 +696,22 @@ export class Galaxy {
     this._colorNebula();
   }
 
+  // Fixed nebula color [r, g, b] in 0..1 from the settings, or null to use the cluster colors.
+  _fixedNebula() {
+    return this.opts.nebulaColor?.() || null;
+  }
+
+  // Apply changed nebula settings.
+  refreshNebula() {
+    this._recolor();
+  }
+
   _colorNebula() {
     if (!this.nebMat || !this.dustClusters) return;
     const cols = this.nebMat.uniforms.uColors.value;
+    const fixed = this._fixedNebula();
     this.dustClusters.forEach((c, k) => {
+      if (fixed) return cols[k].set(fixed[0], fixed[1], fixed[2]);
       const cc = c.color || [0.7, 0.7, 0.7];
       // Desaturate the cluster color to give the gas a softer glow.
       cols[k].set(cc[0] * 0.75 + 0.12, cc[1] * 0.75 + 0.12, cc[2] * 0.75 + 0.12);
@@ -955,7 +978,9 @@ export class Galaxy {
     this.skyMat.uniforms.uTint.value.setRGB(acc[0], acc[1], acc[2]);
     this._colorNebula();
     this.glow?.material.color.setRGB(0.8 + acc[0] * 0.2, 0.5 + acc[1] * 0.15, 0.22 + acc[2] * 0.1);
-    for (const s of this.smoke) s.material.color.setRGB(0.72 + acc[0] * 0.12, 0.72 + acc[1] * 0.12, 0.74 + acc[2] * 0.12);
+    // Tint the background smoke slightly with the accent or the fixed nebula color.
+    const tint = this._fixedNebula() || acc;
+    for (const s of this.smoke) s.material.color.setRGB(0.72 + tint[0] * 0.12, 0.72 + tint[1] * 0.12, 0.74 + tint[2] * 0.12);
     // Tint a fraction of the warm white dust with the accent color.
     const dc = this.dust?.geometry.getAttribute('aColor');
     if (dc) {
@@ -965,7 +990,7 @@ export class Galaxy {
     }
     dc.needsUpdate = true;
     }
-    for (const c of this.comets) c.mat.uniforms.uColor.value.setRGB(0.92 + acc[0] * 0.08, 0.92 + acc[1] * 0.08, 0.95 + acc[2] * 0.05);
+    if (this.cometColor) this.cometColor.setRGB(0.92 + acc[0] * 0.08, 0.92 + acc[1] * 0.08, 0.95 + acc[2] * 0.05);
     if (!this.stars) return;
 
     const hv = this.hover;
