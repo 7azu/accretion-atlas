@@ -258,18 +258,45 @@ export class Overlay {
       q.x = hc.x + ux * lim;
       q.y = hc.y + uy * lim;
     }
+    // When an overlap moves a name to another slot (26 px steps), don't jump: fade it out, move it
+    // while invisible and fade it back in. If the overlap clears again while fading out, it fades
+    // back in at the old slot (no flickering back and forth).
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - (this._labT || now)) / 1000);
+    this._labT = now;
     for (const [lab, q] of order) {
       const w = (lab._lw ||= Math.max(60, lab._name.textContent.length * 7.5 + 20));
-      let y = q.y;
+      let slot = 0;
       for (let tries = 0; tries < 4; tries++) {
+        const y = q.y + slot * 26;
         const r = { x: q.x - w / 2, y: y - 14, w, h: 28 };
         if (!placed.some((t) => r.x < t.x + t.w && r.x + r.w > t.x && r.y < t.y + t.h && r.y + r.h > t.y)) break;
-        y += 26;
+        slot++;
       }
+      if (lab._slot === undefined) lab._slot = slot;
+      if (lab._fade === undefined) lab._fade = 1;
+      if (slot !== lab._slot) {
+        lab._fade -= dt / 0.15;
+        if (lab._fade <= 0) {
+          lab._fade = 0;
+          lab._slot = slot;
+        }
+      } else {
+        lab._fade = Math.min(1, lab._fade + dt / 0.2);
+      }
+      // A name occupies the slot it is currently drawn at.
+      const y = q.y + lab._slot * 26;
       placed.push({ x: q.x - w / 2, y: y - 14, w, h: 28 });
-      const o = Math.max(0.28, Math.min(1, 1.5 - q.depth / 2200));
-      lab.style.opacity = String(o);
-      lab.style.pointerEvents = '';
+      // While moving, _fade drives the opacity frame by frame; the CSS transition (0.4 s) would lag
+      // behind and the name would still be visible when it moves.
+      const fading = lab._fade < 1 || slot !== lab._slot;
+      if (fading !== !!lab._fading) {
+        lab._fading = fading;
+        lab.style.transition = fading ? 'none' : '';
+      }
+      const o = Math.max(0.28, Math.min(1, 1.5 - q.depth / 2200)) * lab._fade;
+      lab.style.opacity = o > 0.004 ? o.toFixed(3) : '0';
+      lab.style.pointerEvents = lab._fade > 0.5 ? '' : 'none';
       lab.style.transform = `translate(${q.x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%)`;
     }
     // Update the nearby-note selection every few frames and track positions in between.
@@ -444,21 +471,29 @@ export class Overlay {
     // Place the text below the disk and the hover ring just outside the photon ring.
     const R = r0 * 2.7 + 6;
     const ringR = r0 * 2.3;
-    const size = Math.ceil(R + 16);
-    if (Math.abs(R - h._r) > 0.4) {
+    // Rebuild the arc (and with it the glyph layout) only on a clear change, so its curvature fits.
+    // Rebuilding on every change over 0.4 px with a rounded-up size made the text stand still for a
+    // few frames and then jump by 1-2 px.
+    if (!h._r || Math.abs(R / h._r - 1) > 0.08) {
       h._r = R;
+      h._size = Math.ceil(R + 16);
+      const size = h._size;
       h._svg.setAttribute('width', String(size * 2));
       h._svg.setAttribute('height', String(size * 2));
       h._svg.setAttribute('viewBox', `0 0 ${size * 2} ${size * 2}`);
       // Trace the lower arc from left to right to keep the text upright.
       h._arc.setAttribute('d', `M ${size - R} ${size} A ${R} ${R} 0 0 0 ${size + R} ${size}`);
       h._ring.setAttribute('cx', String(size));
-      h._ring.setAttribute('cy', String(size));
-      h._ring.setAttribute('r', ringR.toFixed(1));
       h.style.width = h.style.height = `${size * 2}px`;
     }
+    // In between, move smoothly: shift the whole label by the missing distance (compositor only, the
+    // text is not laid out again) and the ring (a circle, no text) the opposite way to keep it centered.
+    const size = h._size;
+    const off = R - h._r;
+    h._ring.setAttribute('cy', (size - off).toFixed(2));
+    h._ring.setAttribute('r', ringR.toFixed(2));
     h.style.opacity = '';
-    h.style.transform = `translate(${(p.x - size).toFixed(1)}px, ${(p.y - size).toFixed(1)}px)`;
+    h.style.transform = `translate(${(p.x - size).toFixed(2)}px, ${(p.y - size + off).toFixed(2)}px)`;
     this._holeBox = { x: p.x - 70, y: p.y + R - 14, w: 140, h: 24 };
   }
 

@@ -846,6 +846,8 @@
   top: 0;
   pointer-events: none;
   transition: opacity 0.4s;
+  /* own layer: the compositor moves it smoothly every frame without repainting */
+  will-change: transform;
 }
 .aat-hole svg {
   display: block;
