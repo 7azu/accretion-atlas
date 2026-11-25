@@ -4,16 +4,49 @@ import { parseLinktext } from 'obsidian';
 export const DAY = 86400000;
 const MAX_LEVEL = 3;
 
-export function clusterOf(path) {
+// A cluster is the top-level folder of a note, unless a rule names a deeper folder. A rule is a folder
+// pattern such as "School/Year */*" ("*" stands for any text within one folder name): the folder it
+// matches becomes the cluster, named after its last part. The first rule that fits the start of the
+// note's path wins, so deeper rules go first.
+export function parseClusterRules(text) {
+  return String(text || '')
+    .split('\n')
+    .map((line) => line.trim().replace(/^\/+|\/+$/g, ''))
+    .filter(Boolean)
+    .map((line) => line.split('/').map((part) => new RegExp('^' + part.trim().replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$')));
+}
+
+export function clusterOf(path, rules = []) {
   const dirs = path.split('/').slice(0, -1);
   if (!dirs.length) return { key: '', name: 'Vault', sub: 'Root folder' };
+  for (const rule of rules) {
+    if (rule.length > dirs.length || !rule.every((part, i) => part.test(dirs[i]))) continue;
+    const depth = rule.length;
+    return { key: '/' + dirs.slice(0, depth).join('/'), name: dirs[depth - 1], sub: depth > 1 ? dirs[depth - 2] : '' };
+  }
   return { key: '/' + dirs[0], name: dirs[0], sub: '' };
+}
+
+// Tasks come from note properties (frontmatter). Which property holds the state, which values mean
+// open, partly done and done, and which property holds the due date is set in the plugin settings
+// (options.tasks). The state is stored in a fixed form: 'open' | 'partial' | 'done'.
+function readTask(frontmatter, cfg) {
+  const value = String(frontmatter[cfg.statusKey] ?? '').trim().toLowerCase();
+  if (!value) return null;
+  const status = cfg.done.includes(value) ? 'done' : cfg.partial.includes(value) ? 'partial' : cfg.open.includes(value) ? 'open' : null;
+  if (!status) return null;
+  const due = frontmatter[cfg.dueKey] ? Date.parse(frontmatter[cfg.dueKey]) : NaN;
+  const label = cfg.labelKey ? frontmatter[cfg.labelKey] : null;
+  return { status, due: isNaN(due) ? null : due, label: label == null ? '' : String(label) };
 }
 
 const norm = (s) => s.toLowerCase().replace(/\s+/g, ' ').trim();
 export const pageIdOf = (n) => (n.type === 'section' ? n.page : n.id);
 
-export function buildModel(app) {
+// options: { clusterRules: parsed rules (parseClusterRules), tasks: null or the task settings }
+export function buildModel(app, options = {}) {
+  const rules = options.clusterRules || [];
+  const taskConfig = options.tasks || null;
   const mc = app.metadataCache;
   const files = app.vault.getMarkdownFiles();
   const nodes = new Map();
@@ -23,7 +56,7 @@ export function buildModel(app) {
   const sectionsOf = new Map();
 
   const clusterFor = (path) => {
-    const c = clusterOf(path);
+    const c = clusterOf(path, rules);
     if (!clusters.has(c.key)) clusters.set(c.key, { ...c, pages: 0, ideas: 0 });
     return clusters.get(c.key);
   };
@@ -41,6 +74,10 @@ export function buildModel(app) {
     cl.pages++;
 
     const cache = mc.getFileCache(f);
+    if (taskConfig && cache?.frontmatter) {
+      const task = readTask(cache.frontmatter, taskConfig);
+      if (task) page.task = task;
+    }
     const secs = [];
     const stack = [{ node: page, level: 0 }];
     const seen = new Map();
@@ -160,6 +197,14 @@ function buildStats(model, pages) {
   const ideas = model.clusters.reduce((s, c) => s + c.ideas, 0);
   const week = now - 7 * DAY;
 
+  // Tasks that are not done and have a due date, the next ones first. Long overdue ones drop out.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const comingUp = pages
+    .filter((p) => p.task && p.task.status !== 'done' && p.task.due != null && p.task.due >= today.getTime() - 21 * DAY)
+    .map((p) => ({ path: p.path, title: p.task.label ? `${p.task.label}: ${p.name}` : p.name, due: p.task.due, status: p.task.status }))
+    .sort((a, b) => a.due - b.due);
+
   return {
     pages: pages.length,
     ideas,
@@ -176,6 +221,7 @@ function buildStats(model, pages) {
     byCluster: [...model.clusters].sort((a, b) => b.ideas - a.ideas),
     mostConnected: [...pages].sort((a, b) => b.degree - a.degree).slice(0, 6),
     recent: [...pages].sort((a, b) => b.mtime - a.mtime).slice(0, 6),
+    comingUp: comingUp.slice(0, 4),
     pagesList: pages,
     activity: activity(pages, 84),
   };
@@ -281,6 +327,16 @@ export function localModel(model, centerPath) {
   return out;
 }
 
+// Fingerprint of the tasks only: when just a state or due date changed, recoloring is enough.
+export function taskSignature(data) {
+  let h = 0;
+  for (const n of data.nodes) {
+    if (!n.task) continue;
+    const s = n.id + n.task.status + (n.task.due ?? '');
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  }
+  return String(h);
+}
 // Fingerprint the graph to skip redundant rebuilds.
 export function signature(data) {
   let h = 0;

@@ -16,7 +16,10 @@ await build({
   format: 'cjs',
   platform: 'browser',
   target: 'es2022',
-  external: ['obsidian'],
+  // The desktop launcher (Linux) uses Node; the plugin is desktop only
+  external: ['obsidian', 'node:fs/promises', 'node:path'],
+  // Launcher files travel inside the bundle and are written out when the launcher is turned on
+  loader: { '.sh': 'text', '.qml': 'text', '.svg': 'text' },
   minify: true,
   legalComments: 'inline',
   footer: { js: '/*!\n' + notices.join('\n') + '\n*/' },

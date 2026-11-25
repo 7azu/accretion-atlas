@@ -43,6 +43,18 @@ const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a
 const ease = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
 const PALETTE_ORDER = [5, 0, 3, 1, 2, 4, 6];
 
+// Tasks (note properties, see model.js): stars of open tasks get their own colors, overdue ones pulse.
+// taskState: 'overdue' | 'open' | 'partial' | 'done' | null (the note is no task)
+const TASK_COLORS = { overdue: [1.45, 0.5, 0.42], open: [1.4, 0.95, 0.5], partial: [1.25, 1.15, 0.62] };
+export function taskState(n) {
+  const t = n.task;
+  if (!t) return null;
+  if (t.status === 'done') return 'done';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (t.due != null && t.due < today.getTime()) return 'overdue';
+  return t.status === 'partial' ? 'partial' : 'open';
+}
 // Four domain-warped noise textures share a 2 by 2 atlas.
 let NEB_ATLAS = null;
 function nebulaAtlas() {
@@ -125,7 +137,7 @@ export class Galaxy {
     this.uReveal = { value: 1e7 };
     this.uLens = { value: RS }; // Black hole mass used to lens stars and dust.
     this.uIntro = { value: 1 };
-    this._setupIntro();
+    this._setupIntro(opts.intro);
     try {
       this._initRenderer();
       this._initScene();
@@ -539,6 +551,7 @@ export class Galaxy {
   }
 
   _resize() {
+    this._clearFirstFrameFence();
     const w = Math.max(1, this.container.clientWidth);
     const h = Math.max(1, this.container.clientHeight);
     this.width = w;
@@ -935,6 +948,7 @@ export class Galaxy {
     g.setAttribute('aColor', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
     g.setAttribute('aAlpha', new THREE.BufferAttribute(new Float32Array(n), 1));
     g.setAttribute('aPhase', new THREE.BufferAttribute(new Float32Array(this.nodes.map((x) => x.phase)), 1));
+    g.setAttribute('aPulse', new THREE.BufferAttribute(new Float32Array(n), 1));
     this.stars = new THREE.Points(g, this.starMat);
     this.stars.frustumCulled = false;
     this.stars.renderOrder = 2;
@@ -998,12 +1012,26 @@ export class Galaxy {
     const col = this.stars.geometry.getAttribute('aColor');
     const al = this.stars.geometry.getAttribute('aAlpha');
     const sz = this.stars.geometry.getAttribute('aSize');
+    const pu = this.stars.geometry.getAttribute('aPulse');
+    const filter = this.taskFilter;
     this.nodes.forEach((n, i) => {
       const cc = this.clusterByKey.get(n.cluster)?.color || acc;
       let c, a = n.alpha, s = n.size;
       if (n.type === 'page') c = mix3(STAR_WHITE, cc, 0.4).map((x) => x * 1.15);
       else if (n.type === 'section') c = mix3(STAR_WHITE, cc, 0.22).map((x) => x * (1.3 - (n.level - 1) * 0.08));
       else c = [0.55, 0.55, 0.58];
+      const st = taskState(n);
+      if (st && st !== 'done') {
+        c = TASK_COLORS[st];
+        s *= st === 'overdue' ? 1.3 : 1.15;
+      }
+      pu.setX(i, st === 'overdue' ? 1 : 0);
+      if (filter) {
+        if (st && st !== 'done') {
+          s *= 1.35;
+          a = Math.max(a, 1);
+        } else a *= n.type === 'page' ? 0.1 : 0.05;
+      }
       if (hv) {
         if (n === hv) {
           c = mix3([1, 1, 1], acc, 0.35).map((x) => x * 1.6);
@@ -1018,7 +1046,7 @@ export class Galaxy {
       al.setX(i, a);
       sz.setX(i, s);
     });
-    col.needsUpdate = al.needsUpdate = sz.needsUpdate = true;
+    col.needsUpdate = al.needsUpdate = sz.needsUpdate = pu.needsUpdate = true;
 
     const lc = this.lines.geometry.getAttribute('aColor');
     const la = this.lines.geometry.getAttribute('aAlpha');
@@ -1036,6 +1064,7 @@ export class Galaxy {
         c = mix3([1, 1, 1], cc, 0.12);
         a = s.cluster === t.cluster ? 0.022 : 0.01;
       }
+      if (filter) a *= 0.15;
       if (hv) {
         if (s === hv || t === hv) {
           c = acc;
@@ -1048,6 +1077,26 @@ export class Galaxy {
       la.setX(i * 2 + 1, a);
     });
     lc.needsUpdate = la.needsUpdate = true;
+  }
+  // Take over changed task states without a new layout
+  updateTasks(nodes) {
+    for (const m of nodes) {
+      const n = this.nodeById.get(m.id);
+      if (n) n.task = m.task;
+    }
+    this._recolor();
+  }
+  // Filter: only open tasks stay bright
+  setTaskFilter(on) {
+    this.taskFilter = on;
+    this._recolor();
+  }
+  // Open tasks, overdue ones first, then by due date
+  openTasks() {
+    const rank = { overdue: 0, open: 1, partial: 2 };
+    return this.nodes
+      .filter((n) => n.type === 'page' && n.alpha > 0 && rank[taskState(n)] != null)
+      .sort((a, b) => rank[taskState(a)] - rank[taskState(b)] || (a.task.due ?? Infinity) - (b.task.due ?? Infinity));
   }
 
   // An anchored preview follows its star without pointer input.
@@ -1241,18 +1290,38 @@ export class Galaxy {
   }
 
   // The intro ignites the disk from the inside out and moves the camera inward. Stars, dust and links appear first, followed by gas, sky, comets and the interface.
-  _setupIntro() {
+  _setupIntro(mode) {
+    this.intro = null;
+    if (mode !== 'hold' && mode !== 'play') return;
     const still = !!this.win.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    this.intro = { t: 0, dur: still ? 0.6 : 2.3, still, flash: 0, ui: false };
+    this.intro = { run: mode === 'play', t: 0, wait: 0, dur: still ? 0.6 : mode === 'hold' ? 2.9 : 2.3, still, flash: 0, ui: false };
     this.uReveal.value = 1;
     this.uIntro.value = 0;
+  }
+  // Play the opening again (desktop launcher on a galaxy that is already there). mode 'held' waits
+  // for beginIntro, which the loading screen calls when it lets go.
+  restartIntro(mode, onReady) {
+    this.fly = null;
+    this.follow = null;
+    this._setupIntro(mode);
+    if (!this.intro) return;
+    this.bhMat.uniforms.uIgnite.value = 0;
+    for (const sm of this.smoke || []) sm.material.opacity = 0;
+    if (onReady) {
+      this._clearFirstFrameFence();
+      this.opts.onFirstFrame = onReady;
+    }
+  }
+  beginIntro() {
+    if (this.intro) this.intro.run = true;
   }
 
   // Return true while the intro controls the camera.
   _intro(dt) {
     const it = this.intro;
     if (!it) return false;
-    it.t += dt;
+    if (!it.run && (it.wait += dt) > 8) it.run = true;
+    if (it.run) it.t += dt;
     const k = Math.min(1, it.t / it.dur);
     // Peak speed occurs one third of the way through the motion. The derivative is 12k(1-k)².
     const glide = (x) => {
@@ -1260,7 +1329,7 @@ export class Galaxy {
       return 1 - Math.pow(1 - c, 3) * (1 + 3 * c);
     };
     const outCubic = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
-    if (it.radius == null) {
+    if (it.radius == null && it.run) {
       let m = 0;
       for (const n of this.nodes) m = Math.max(m, Math.hypot(n.x, n.y, n.z));
       it.radius = Math.max(m, KEEP_OUT * 1.6) * 1.45;
@@ -1314,6 +1383,13 @@ export class Galaxy {
   labelCandidates(limit = 26) {
     const out = [];
     const o = {};
+    if (this.taskFilter) {
+      for (const n of this.openTasks()) {
+        this.project(n.x, n.y, n.z, o);
+        if (o.front && o.x >= 0 && o.y >= 0 && o.x <= this.width && o.y <= this.height) out.push(n);
+      }
+      return out.slice(0, limit);
+    }
     for (const n of this.nodes) {
       if (n.type !== 'page' || n.alpha <= 0) continue;
       this.project(n.x, n.y, n.z, o);
@@ -1352,7 +1428,7 @@ export class Galaxy {
   _frame(t) {
     this._raf = this.win.requestAnimationFrame(this._frame);
     const now = t / 1000;
-    if (!this.container.isConnected || this.width < 2 || this.height < 2 || this.container.clientWidth < 2 || this.doc.hidden) {
+    if (!this.container.isConnected || this.width < 2 || this.height < 2 || this.container.clientWidth < 2 || this.doc.hidden || this.opts.held?.()) {
       this._lastT = 0;
       return;
     }
@@ -1453,8 +1529,10 @@ export class Galaxy {
     try {
       this.composer.render(dt);
       this.opts.onFrame?.(this);
+      if (this.opts.onFirstFrame) this._checkFirstFrame();
     } catch (error) {
-      this.opts.onRenderError(error);
+      if (!this.opts.onFirstFrame) throw error;
+      this.opts.onFirstFrameError(error);
       return;
     }
 
@@ -1476,11 +1554,36 @@ export class Galaxy {
     }
   }
 
+  // Report the first frame only once the GPU has really drawn it (fence), so the loading screen
+  // does not open onto an empty canvas.
+  _checkFirstFrame() {
+    const gl = this.renderer.getContext();
+    if (gl.isContextLost()) throw new Error('The WebGL context was lost while loading.');
+    if (this.firstFrameFence) {
+      if (gl.clientWaitSync(this.firstFrameFence, 0, 0) === gl.TIMEOUT_EXPIRED) return;
+      this._clearFirstFrameFence();
+    } else {
+      this.firstFrameFence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      if (this.firstFrameFence) {
+        gl.flush();
+        return;
+      }
+    }
+    const ready = this.opts.onFirstFrame;
+    ready();
+    this.opts.onFirstFrame = null;
+  }
+  _clearFirstFrameFence() {
+    if (!this.firstFrameFence) return;
+    this.renderer.getContext().deleteSync(this.firstFrameFence);
+    this.firstFrameFence = null;
+  }
   dispose() {
     this.win.cancelAnimationFrame(this._raf);
     this.sim?.stop();
     this.resizeObserver?.disconnect();
     if (!this.renderer) return;
+    this._clearFirstFrameFence();
     const el = this.renderer.domElement;
     el.removeEventListener('pointermove', this._onMove);
     el.removeEventListener('pointerdown', this._onDown);

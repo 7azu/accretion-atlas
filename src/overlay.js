@@ -1,6 +1,8 @@
 // HTML controls and labels over the 3D scene.
 import { setIcon, Component } from 'obsidian';
 
+import { taskState } from './galaxy.js';
+import { DAY } from './model.js';
 function el(tag, cls, parent, text) {
   const e = parent.ownerDocument.createElement(tag);
   if (cls) e.className = cls;
@@ -9,6 +11,80 @@ function el(tag, cls, parent, text) {
   return e;
 }
 
+// Loading screen for the desktop launcher (plugin setting, Linux): covers the window with a quiet star
+// field until the first frame of the galaxy is drawn, then opens from the place of the black hole.
+// The same picture is shown before by the launcher's own window (launcher/Launch.qml), so the two join.
+export class LaunchLoadingScreen {
+  constructor(doc) {
+    this.element = el('div', 'aat-launch-screen', doc.body);
+    const veil = el('div', 'aat-launch-veil', this.element);
+    const stars = el('div', 'aat-launch-stars', veil);
+    el('div', 'aat-launch-ring', this.element);
+    stars.setAttribute('aria-hidden', 'true');
+    const orbit = el('div', 'aat-launch-orbit', this.element);
+    el('div', 'aat-launch-glow', orbit);
+    el('div', 'aat-launch-disc', orbit);
+    el('div', 'aat-launch-hole', orbit);
+    const track = el('div', 'aat-launch-track', orbit);
+    el('div', 'aat-launch-dust', track);
+    const status = el('div', 'aat-launch-status', orbit, 'Loading the galaxy …');
+    status.setAttribute('role', 'status');
+  }
+  waitForPaint() {
+    const win = this.element.ownerDocument.defaultView;
+    return new Promise((resolve) => {
+      let frame;
+      const done = () => {
+        window.clearTimeout(timeout);
+        if (!win.closed) win.cancelAnimationFrame(frame);
+        resolve();
+      };
+      const timeout = window.setTimeout(done, 300);
+      frame = win.requestAnimationFrame(() => {
+        frame = win.requestAnimationFrame(done);
+      });
+    });
+  }
+  reveal() {
+    if (this.fade || !this.element.isConnected) return;
+    const win = this.element.ownerDocument.defaultView;
+    const reduced = win.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    this.element.setAttribute('aria-hidden', 'true');
+    const at = this.anchor?.() ?? [0.5, 0.5];
+    const st = this.element.style;
+    st.setProperty('--aat-iris-x', `${(at[0] * 100).toFixed(2)}%`);
+    st.setProperty('--aat-iris-y', `${(at[1] * 100).toFixed(2)}%`);
+    st.setProperty('--aat-iris-dx', `${((at[0] - 0.5) * 100).toFixed(2)}vw`);
+    st.setProperty('--aat-iris-dy', `${((at[1] - 0.5) * 100).toFixed(2)}vh`);
+    this.element.classList.add('is-opening');
+    this.onRelease?.();
+    const dur = reduced ? 200 : 1150;
+    const start = win.performance.now();
+    const far = Math.hypot(win.innerWidth, win.innerHeight);
+    const smooth = (x) => {
+      const c = Math.min(1, Math.max(0, x));
+      return c * c * c * (c * (c * 6 - 15) + 10);
+    };
+    this.fade = { done: false };
+    const step = (now) => {
+      if (!this.element.isConnected) return;
+      const k = Math.min(1, (now - start) / dur);
+      const r = smooth((k - 0.1) / 0.85) * far * 1.05;
+      st.setProperty('--aat-iris-r', `${r.toFixed(1)}px`);
+      st.setProperty('--aat-iris-soft', `${(40 + r * 0.32).toFixed(1)}px`);
+      st.setProperty('--aat-iris-ring', (Math.sin(Math.PI * Math.min(1, k * 1.15)) * (1 - k) * 1.6).toFixed(3));
+      st.setProperty('--aat-iris-core', (1 - smooth(k / 0.4)).toFixed(3));
+      if (k < 1) this.frame = win.requestAnimationFrame(step);
+      else this.dispose();
+    };
+    this.frame = win.requestAnimationFrame(step);
+  }
+  dispose() {
+    const win = this.element.ownerDocument.defaultView;
+    if (this.frame && win && !win.closed) win.cancelAnimationFrame(this.frame);
+    this.element.remove();
+  }
+}
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const fmtDay = (t) => {
@@ -58,6 +134,8 @@ export class Overlay {
     this.modePill.addEventListener('click', () => view.toggleMode());
 
     this.greet = el('div', 'aat-greet', root);
+    this.taskChip = el('div', 'aat-task-chip', root);
+    this.taskChip.addEventListener('click', () => this._nextTask());
     this.local = el('div', 'aat-local', root);
     this.tip = el('div', 'aat-tip', root);
     this.empty = el('div', 'aat-empty', root);
@@ -76,6 +154,8 @@ export class Overlay {
     btn('plus', 'Zoom in', () => view.galaxy?.zoomBy(0.72));
     btn('rotate-ccw', 'Reset view', () => view.galaxy?.home());
     this.pauseBtn = btn('pause', 'Pause motion', () => this.togglePause());
+    this.taskBtn = btn('list-todo', 'Show open tasks only', () => this.toggleTaskFilter());
+    this.editorBtn = btn('book-open', 'Open Obsidian', () => view.showObsidian());
     btn('maximize', 'Full screen', () => {
       const doc = root.ownerDocument;
       if (doc.fullscreenElement) doc.exitFullscreen();
@@ -93,6 +173,11 @@ export class Overlay {
     root.addEventListener('keydown', this._onKey);
   }
 
+  // Solo: the galaxy fills the window like an app of its own (desktop launcher). Then a button leads
+  // back to the notes.
+  setSolo(enabled) {
+    this.editorBtn.style.display = enabled ? '' : 'none';
+  }
   togglePause() {
     const g = this.view.galaxy;
     if (!g) return;
@@ -108,6 +193,7 @@ export class Overlay {
   // View state
   setData(data, stats, mode, extra = {}) {
     this.data = data;
+    this.root.win.setTimeout(() => this._updateTaskChip(), 0);
     this.stats = stats;
     this.mode = mode;
     this.root.classList.toggle('is-local', mode === 'local');
@@ -211,6 +297,26 @@ export class Overlay {
         : 'No new notes or changes since your last visit.'
       : `${changed} ${changed === 1 ? 'note' : 'notes'} edited this week.`;
     el('div', 'aat-news', g, news);
+    if (stats.comingUp.length) {
+      el('div', 'aat-section-title', g, 'Upcoming');
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      for (const it of stats.comingUp) {
+        const row = el('div', 'aat-up', g);
+        const days = Math.round((it.due - today.getTime()) / DAY);
+        const d = el('span', 'aat-up-date', row, days < 0 ? `since ${fmtDay(it.due)}` : days === 0 ? 'today' : days === 1 ? 'tomorrow' : `due ${fmtDay(it.due)}`);
+        if (days < 0) d.classList.add('is-overdue');
+        else if (days <= 7) d.classList.add('is-soon');
+        el('span', 'aat-up-title', row, it.title + (it.status === 'partial' ? ' (partial)' : ''));
+        row.title = 'Click: fly there · Double-click: open';
+        row.addEventListener('click', () => {
+          const g = this.view.galaxy;
+          if (g?.nodeById.has(it.path)) g.focusNode(it.path);
+          else this.view.openPath(it.path);
+        });
+        row.addEventListener('dblclick', () => this.view.openPath(it.path));
+      }
+    }
   }
 
   _buildLocal(info) {
@@ -311,7 +417,9 @@ export class Overlay {
       for (const id of want) {
         if (this.nodeLabels.has(id)) continue;
         const n = g.nodeById.get(id);
-        const lab = el('div', 'aat-nlabel', this.labelLayer, n.name);
+        // In the task filter with the cluster in front: tasks of different clusters often share a name
+        const cluster = g.taskFilter ? g.clusterByKey.get(n.cluster)?.name : null;
+        const lab = el('div', 'aat-nlabel', this.labelLayer, cluster ? `${cluster} · ${n.name}` : n.name);
         lab.style.opacity = '0'; // Show the label once its position is known.
         lab.addEventListener('click', (e) => this.view.openPath(n.path, null, e.ctrlKey || e.metaKey));
         this.nodeLabels.set(id, lab);
@@ -378,6 +486,17 @@ export class Overlay {
     el('div', 'aat-tip-title', head, node.type === 'section' ? node.heading : node.name);
     const sub = node.type === 'section' ? `Section in ${node.path.split('/').pop().replace(/\.md$/, '')}` : node.type === 'file' ? 'Attachment' : `${node.sections || 0} ${node.sections === 1 ? 'section' : 'sections'} · ${node.degree} ${node.degree === 1 ? 'link' : 'links'}`;
     el('div', 'aat-tip-sub', head, sub);
+    const st = taskState(node);
+    if (st) {
+      const due = node.task.due != null ? fmtDay(node.task.due) : null;
+      const text = {
+        overdue: `overdue since ${due}`,
+        open: due ? `open · due ${due}` : 'open',
+        partial: due ? `partly done · due ${due}` : 'partly done',
+        done: 'done',
+      }[st];
+      el('div', `aat-task-tag is-${st}`, head, text);
+    }
     const body = el('div', 'aat-pv markdown-rendered', this.tip);
     this.tip.style.opacity = '1';
     this._placeTip();
@@ -497,15 +616,71 @@ export class Overlay {
     this._holeBox = { x: p.x - 70, y: p.y + R - 14, w: 140, h: 24 };
   }
 
+  // ---- Tasks: filter to open ones, a chip with the count, a click flies to the next ----
+  setTasksEnabled(enabled) {
+    this.taskBtn.style.display = enabled ? '' : 'none';
+    if (!enabled && this.view.galaxy?.taskFilter) this.toggleTaskFilter(false);
+  }
+
+  toggleTaskFilter(force) {
+    const g = this.view.galaxy;
+    if (!g) return;
+    const on = force ?? !g.taskFilter;
+    g.setTaskFilter(on);
+    this.root.classList.toggle('is-task-filter', on);
+    this.taskBtn.classList.toggle('is-active', on);
+    this._taskIndex = -1;
+    for (const lab of this.nodeLabels.values()) lab.remove();
+    this.nodeLabels.clear();
+    this._frameNo = 0;
+    this._updateTaskChip();
+  }
+  _updateTaskChip() {
+    const g = this.view.galaxy;
+    const c = this.taskChip;
+    c.empty();
+    if (!g?.taskFilter) return;
+    const list = g.openTasks();
+    const late = list.filter((n) => taskState(n) === 'overdue').length;
+    if (!list.length) {
+      el('span', '', c, 'No open tasks');
+      return;
+    }
+    el('span', 'aat-task-count', c, `${list.length} ${list.length === 1 ? 'open task' : 'open tasks'}`);
+    if (late) el('span', 'aat-task-late', c, `${late} overdue`);
+    const next = el('span', 'aat-task-next', c);
+    setIcon(next, 'chevron-right');
+    c.setAttribute('aria-label', 'Fly to the next open task');
+  }
+  _nextTask() {
+    const g = this.view.galaxy;
+    const list = g?.openTasks() ?? [];
+    if (!list.length) return;
+    this._taskIndex = ((this._taskIndex ?? -1) + 1) % list.length;
+    g.focusNode(list[this._taskIndex].id);
+  }
   // Dashboard
   toggleDash(force) {
     const open = force ?? !this.dash.classList.contains('is-open');
     if (open === this.dash.classList.contains('is-open')) return;
     this.dash.classList.toggle('is-open', open);
     this.root.classList.toggle('dash-open', open);
+    const win = this.root.win;
+    win.clearTimeout(this._arriveTimer);
     if (open) {
+      // Arriving: sections rise one after the other, numbers count up, the ring draws itself. Only
+      // while the panel opens; a rebuild after the vault changed shows everything at once.
+      this._arriving = !win.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      this.dash.classList.toggle('is-arriving', this._arriving);
       this._buildDash();
-      this.root.win.setTimeout(() => this.input?.focus(), 30);
+      this._arriveTimer = win.setTimeout(() => {
+        this._arriving = false;
+        this.dash.classList.remove('is-arriving');
+      }, 1900);
+      win.setTimeout(() => this.input?.focus(), 30);
+    } else {
+      this._arriving = false;
+      this.dash.classList.remove('is-arriving');
     }
   }
 
@@ -515,9 +690,9 @@ export class Overlay {
     d.empty();
     const head = el('div', 'aat-dash-head', d);
     const title = el('div', 'aat-dash-title', head);
-    el('div', 'aat-dash-name', title, 'Overview');
     const now = new Date();
     el('div', 'aat-dash-date', title, `${WEEKDAYS[now.getDay()]}, ${fmtDay(now.getTime())}, ${now.getFullYear()}`);
+    el('div', 'aat-dash-name', title, 'Overview');
     const close = el('div', 'aat-close', head);
     close.setAttribute('aria-label', 'Close');
     setIcon(close, 'x');
@@ -554,32 +729,61 @@ export class Overlay {
     this._buildDashHome();
   }
 
-  _section(parent, label, aside) {
+  // A section of the dashboard: its number, its name, a hairline to the edge, optionally something on
+  // the right. --i staggers the sections while the panel arrives.
+  _section(parent, label, aside, note) {
+    const no = (this._secNo = (this._secNo || 0) + 1);
     const sec = el('section', 'aat-sec', parent);
+    sec.style.setProperty('--i', String(no));
     const h = el('div', 'aat-sec-head', sec);
+    el('span', 'aat-sec-no', h, String(no).padStart(2, '0'));
     el('span', 'aat-sec-label', h, label);
+    el('i', 'aat-sec-rule', h);
+    if (note) el('span', 'aat-sec-note', h, note);
     if (aside) h.appendChild(aside);
     return sec;
   }
 
-  // Connect each name and value with a dotted leader.
-  _leaderRow(parent, name, value, onClick) {
+  // A row of a list: optionally its place, the name, a value on the right.
+  _leaderRow(parent, name, value, onClick, no) {
     const row = el('div', 'aat-lead', parent);
+    if (no != null) el('span', 'aat-lead-no', row, String(no).padStart(2, '0'));
     el('span', 'aat-lead-name', row, name);
-    el('span', 'aat-lead-dots', row);
     el('span', 'aat-lead-val', row, value);
     if (onClick) row.addEventListener('click', onClick);
     return row;
   }
 
+  // Count a number up from zero while the panel arrives.
+  _count(node, value) {
+    const text = (v) => v.toLocaleString('en-US');
+    const win = this.root.win;
+    if (!this._arriving || value < 2) {
+      node.textContent = text(value);
+      return;
+    }
+    node.textContent = '0';
+    const start = win.performance.now() + 220;
+    const step = (now) => {
+      if (!node.isConnected) return;
+      const k = Math.min(1, Math.max(0, (now - start) / 950));
+      node.textContent = text(Math.round(value * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) win.requestAnimationFrame(step);
+    };
+    win.requestAnimationFrame(step);
+  }
+
   _buildDashHome() {
-    const s = this.view.plugin.getModel().stats;
+    const plugin = this.view.plugin;
+    const s = plugin.getModel().stats;
+    const g = this.view.galaxy;
     const b = this.body;
     b.empty();
-    this.dash.style.setProperty('--aat-chart', this.view.plugin.chartColor());
+    this._secNo = 0;
+    this.dash.style.setProperty('--aat-chart', plugin.chartColor());
 
     // Activity over the past 84 days
-    const act = this._section(b, 'Activity · 12 weeks', this._swatches());
+    const act = this._section(b, 'Activity', this._swatches(), '12 weeks');
     // Keep the selected day when the vault changes.
     const keep = this.day?.t;
     this.day = s.activity.find((d) => d.t === keep) ?? null;
@@ -589,18 +793,50 @@ export class Overlay {
     this._showDay(this.day);
 
     // Vault totals
-    const stock = this._section(b, 'Vault totals');
+    const stock = this._section(b, 'Vault');
     const nums = el('div', 'aat-nums', stock);
-    const num = (n, label) => {
-      const c = el('div', 'aat-numcell', nums);
-      el('div', 'aat-big', c, n.toLocaleString('en-US'));
+    const num = (n, label, into = nums) => {
+      const c = el('div', 'aat-numcell', into);
+      this._count(el('div', 'aat-big', c), n);
       el('div', 'aat-small', c, label);
+      return c;
     };
     num(s.pages, s.pages === 1 ? 'note' : 'notes');
     num(s.ideas, s.ideas === 1 ? 'idea' : 'ideas');
     num(s.links, s.links === 1 ? 'link' : 'links');
     const per = s.pages ? (s.links / s.pages).toFixed(1) : '0';
     el('div', 'aat-note', stock, `${s.newWeek} new and ${s.updatedWeek} edited in the last 7 days · ${per} links per note`);
+
+    // Tasks (setting "Show tasks"): how many are open, what is due next, and the filter of the galaxy
+    const openTasks = plugin.settings.tasks && g ? g.openTasks() : [];
+    if (openTasks.length) {
+      const toggle = this.root.ownerDocument.createElement('button');
+      toggle.className = 'aat-chip-btn';
+      const label = () => (toggle.textContent = g.taskFilter ? 'Show all' : 'Show in galaxy');
+      label();
+      toggle.addEventListener('click', () => {
+        this.toggleTaskFilter();
+        label();
+      });
+      const sec = this._section(b, 'Tasks', toggle);
+      const cells = el('div', 'aat-nums aat-task-nums', sec);
+      const count = (state) => openTasks.filter((n) => taskState(n) === state).length;
+      num(count('overdue'), 'overdue', cells).classList.add('is-overdue');
+      num(count('open'), 'open', cells).classList.add('is-open');
+      num(count('partial'), 'partly done', cells).classList.add('is-partial');
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      for (const it of s.comingUp) {
+        const days = Math.round((it.due - today.getTime()) / DAY);
+        const when = days < 0 ? `since ${fmtDay(it.due)}` : days === 0 ? 'today' : days === 1 ? 'tomorrow' : fmtDay(it.due);
+        const row = this._leaderRow(sec, it.title, when, () => {
+          if (g.nodeById.has(it.path)) g.focusNode(it.path);
+          else this.view.openPath(it.path);
+        });
+        row.classList.toggle('is-overdue', days < 0);
+        row.classList.toggle('is-soon', days >= 0 && days <= 7);
+      }
+    }
 
     // Cluster distribution
     const cl = this._section(b, 'Clusters');
@@ -612,12 +848,15 @@ export class Overlay {
       if (this.mode !== 'global') this.view.toggleMode();
       this.root.win.setTimeout(() => this.view.galaxy?.flyToCluster(c.key), 60);
     };
+    const segs = [];
     for (const c of list) {
       const color = this.view.galaxy?.clusterColorCss(c.key) || '';
       const seg = el('i', '', spec);
-      seg.style.flexGrow = String(c.ideas);
+      // While arriving the bar grows from nothing
+      seg.style.flexGrow = this._arriving ? '0' : String(c.ideas);
       seg.style.background = color;
       seg.title = `${c.name}: ${c.ideas}`;
+      segs.push([seg, c.ideas]);
       const row = el('div', 'aat-leg', legend);
       el('span', 'aat-leg-dot', row).style.background = color;
       el('span', 'aat-leg-name', row, c.name);
@@ -625,6 +864,7 @@ export class Overlay {
       row.title = `${c.ideas} ${c.ideas === 1 ? 'idea' : 'ideas'} · fly to cluster`;
       const hi = (on) => {
         seg.classList.toggle('is-hot', on);
+        row.classList.toggle('is-hot', on);
         spec.classList.toggle('has-hot', on);
       };
       for (const x of [row, seg]) {
@@ -633,12 +873,24 @@ export class Overlay {
         x.addEventListener('click', () => fly(c));
       }
     }
+    if (this._arriving) {
+      const win = this.root.win;
+      win.setTimeout(() => {
+        for (const [seg, grow] of segs) seg.style.flexGrow = String(grow);
+      }, 420);
+    }
 
     const hubs = this._section(b, 'Most connected');
-    for (const p of s.mostConnected) this._leaderRow(hubs, p.name, String(p.degree), () => this.view.openPath(p.path));
+    s.mostConnected.forEach((p, i) => this._leaderRow(hubs, p.name, String(p.degree), () => this.view.openPath(p.path), i + 1));
 
     const rec = this._section(b, 'Recently edited');
-    for (const p of s.recent) this._leaderRow(rec, p.name, ago(p.mtime), () => this.view.openPath(p.path));
+    s.recent.forEach((p, i) => this._leaderRow(rec, p.name, ago(p.mtime), () => this.view.openPath(p.path), i + 1));
+
+    // Signature at the end of the sheet
+    const foot = el('div', 'aat-dash-foot', b);
+    el('span', '', foot, 'Accretion Atlas');
+    el('span', '', foot, plugin.manifest.version);
+    el('span', 'aat-dash-foot-vault', foot, this.view.app.vault.getName());
   }
 
   // Offer the accent, palette swatches and a custom color.
@@ -702,14 +954,14 @@ export class Overlay {
     this.ticks = [];
     days.forEach((d, i) => {
       const a = ang(i);
-      const g = node('g', { class: 'aat-tick' + (i === n - 1 ? ' is-today' : '') });
+      const g = node('g', { class: 'aat-tick' + (i === n - 1 ? ' is-today' : ''), style: `--i:${i}` });
       const k = d.edited.length;
       const age = 0.35 + 0.65 * (i / (n - 1));
       if (k) {
         const len = 4 + LEN * Math.sqrt(k / max);
         const [x1, y1] = pt(a, R0 + 3);
         const [x2, y2] = pt(a, R0 + 3 + len);
-        node('line', { x1, y1, x2, y2, class: 'aat-tick-bar', 'stroke-opacity': age.toFixed(2) }, g);
+        node('line', { x1, y1, x2, y2, pathLength: 1, class: 'aat-tick-bar', 'stroke-opacity': age.toFixed(2) }, g);
       } else {
         const [x, y] = pt(a, R0 + 4);
         node('circle', { cx: x, cy: y, r: 0.9, class: 'aat-tick-zero' }, g);
@@ -754,7 +1006,9 @@ export class Overlay {
     const [a, b, c] = d
       ? [String(d.edited.length), `edited · ${WEEKDAYS[new Date(d.t).getDay()]}, ${fmtDay(d.t)}`, d.created ? `${d.created} created` : '']
       : this.ringDefault;
-    el('div', 'aat-ring-num', mid, a);
+    const num = el('div', 'aat-ring-num', mid);
+    if (d) num.textContent = a;
+    else this._count(num, Number(a));
     el('div', 'aat-ring-lbl', mid, b);
     if (c) el('div', 'aat-ring-sub', mid, c);
   }

@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- Icon "Galaxy": schwarzes Loch (leicht schräg) mit gebogenem Lichtring, schmaler Scheibe und einem
+       Vierzack-Stern wie im Ladescreen. Nur Formen und Verläufe (kein clipPath/mask/filter), damit Qts
+       SVG-Renderer (App-Launcher) es genauso zeigt wie ein Browser. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1a26"/>
+      <stop offset="0.55" stop-color="#0d0c12"/>
+      <stop offset="1" stop-color="#050507"/>
+    </linearGradient>
+    <radialGradient id="warm" cx="128" cy="132" r="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffb468" stop-opacity="0.42"/>
+      <stop offset="0.35" stop-color="#e0773a" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#e0773a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.1"/>
+    </linearGradient>
+    <!-- gebogenes Bild der Scheibenrückseite: oben kräftig, unten schmal -->
+    <linearGradient id="halo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff4e0"/>
+      <stop offset="0.38" stop-color="#ffc27a"/>
+      <stop offset="0.62" stop-color="#e88b42" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ffd8a6" stop-opacity="0.9"/>
+    </linearGradient>
+    <radialGradient id="topglow" cx="128" cy="96" r="70" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffcf92" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#ffcf92" stop-opacity="0"/>
+    </radialGradient>
+    <!-- vordere Scheibe: links heller (kommt auf uns zu), Enden laufen aus -->
+    <linearGradient id="disk" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e07a32" stop-opacity="0"/>
+      <stop offset="0.14" stop-color="#f3a356" stop-opacity="0.85"/>
+      <stop offset="0.36" stop-color="#fff8ec"/>
+      <stop offset="0.6" stop-color="#ffd59b"/>
+      <stop offset="0.84" stop-color="#d26f30" stop-opacity="0.97"/>
+      <stop offset="1" stop-color="#a24d1c" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.3" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="0.62" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="spark" cx="190" cy="66" r="16" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff4e2" stop-opacity="0.7"/>
+      <stop offset="1" stop-color="#fff4e2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Grundform (Squircle) mit feiner Lichtkante -->
+  <rect x="12" y="12" width="232" height="232" rx="60" fill="url(#bg)"/>
+  <rect x="12" y="12" width="232" height="232" rx="60" fill="url(#warm)"/>
+  <rect x="12.75" y="12.75" width="230.5" height="230.5" rx="59.25" fill="none" stroke="url(#edge)" stroke-width="1.5"/>
+
+  <!-- Sterne -->
+  <g fill="#ffffff">
+    <circle cx="62" cy="64" r="1.8" opacity="0.75"/>
+    <circle cx="94" cy="44" r="1.1" opacity="0.5"/>
+    <circle cx="208" cy="122" r="1.3" opacity="0.55"/>
+    <circle cx="52" cy="176" r="1.4" opacity="0.55"/>
+    <circle cx="182" cy="204" r="1.7" opacity="0.7"/>
+    <circle cx="118" cy="214" r="1" opacity="0.4"/>
+    <circle cx="40" cy="120" r="1" opacity="0.4"/>
+  </g>
+  <!-- Vierzack-Stern wie im Ladescreen -->
+  <circle cx="190" cy="66" r="16" fill="url(#spark)"/>
+  <path d="M190 55 C190.8 63.2 191.6 64.6 199.5 66 C191.6 67.4 190.8 68.8 190 77 C189.2 68.8 188.4 67.4 180.5 66 C188.4 64.6 189.2 63.2 190 55Z" fill="#fff6ea"/>
+
+  <!-- Schwarzes Loch, leicht gekippt -->
+  <g transform="rotate(-12 128 132)">
+    <!-- Leuchten über dem Loch -->
+    <ellipse cx="128" cy="104" rx="78" ry="52" fill="url(#topglow)"/>
+    <!-- Rückseite der Scheibe, über den Schatten gebogen: oben breiter Bogen -->
+    <path d="M72 135 A56 64 0 0 1 184 135 L172 135 A44 48 0 0 0 84 135 Z" fill="url(#halo)"/>
+    <!-- ... unten nur ein schmaler Lichtstreif -->
+    <path d="M83 132 A45 46 0 0 0 173 132 L169.5 132 A41.5 42 0 0 1 86.5 132 Z" fill="#ffd9aa" opacity="0.85"/>
+    <!-- Schatten mit feinem Photonenring -->
+    <circle cx="128" cy="132" r="41" fill="#020203"/>
+    <circle cx="128" cy="132" r="41.8" fill="none" stroke="#fff0dc" stroke-width="1.4" opacity="0.85"/>
+    <!-- vordere Scheibe: flach und lang, quer vor dem Schatten -->
+    <ellipse cx="128" cy="136" rx="108" ry="9" fill="url(#disk)"/>
+    <ellipse cx="118" cy="135.5" rx="66" ry="2.6" fill="url(#core)"/>
+  </g>
+</svg>

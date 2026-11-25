@@ -238,6 +238,7 @@ attribute float aSize;
 attribute vec3 aColor;
 attribute float aAlpha;
 attribute float aPhase;
+attribute float aPulse;
 uniform float uScale;
 uniform float uTime;
 uniform float uMinPx;
@@ -310,9 +311,10 @@ void main() {
   float lensed = lens(mv);
   gl_Position = lensed > 0.0 ? projectionMatrix * mv : vec4(2.0, 2.0, 2.0, 1.0);
   float depth = -mv.z;
-  float px = max(aSize * uScale / max(depth, 1.0), uMinPx * 0.6);
+  float pulse = aPulse * pow(0.5 + 0.5 * sin(uTime * 2.4 + aPhase * 6.2832), 2.0);
+  float px = max(aSize * uScale / max(depth, 1.0), uMinPx * 0.6) * (1.0 + 0.55 * pulse);
   vColor = aColor;
-  vAlpha = aAlpha * pointSetup(px, depthBlur(depth)) * depthFade(depth) * reveal((modelMatrix * vec4(position, 1.0)).xyz) * lensed;
+  vAlpha = aAlpha * (1.0 + 0.6 * pulse) * pointSetup(px, depthBlur(depth)) * depthFade(depth) * reveal((modelMatrix * vec4(position, 1.0)).xyz) * lensed;
   lensSprite();
 }
 `;
