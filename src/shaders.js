@@ -33,6 +33,84 @@ float fbm(vec3 p) {
 }
 `;
 
+// Chunks shared by the point and line shaders.
+const REVEAL = /* glsl */ `
+// Reveal stars outward from the black hole. uReveal is the front radius in world units.
+uniform float uReveal;
+float reveal(vec3 w) { return 1.0 - smoothstep(uReveal * 0.55, uReveal, length(w)); }
+`;
+
+const DEPTH = /* glsl */ `
+// Dim points behind the focal plane and blur them with distance from it on either side. uFocus is the camera-to-target distance.
+uniform float uFocus;
+float depthFade(float depth) {
+  return mix(1.0, 0.36, smoothstep(uFocus - 150.0, uFocus + 650.0, depth));
+}
+float depthBlur(float depth) {
+  return 1.0 + 1.4 * smoothstep(220.0, 900.0, abs(depth - uFocus));
+}
+`;
+
+const POINT = /* glsl */ `
+// Use a Gaussian width of px/6 with a minimum of 0.8 pixels. Widen and dim smaller points to conserve light and prevent subpixel flicker.
+const float SIG_MIN = 0.8;
+varying float vSig;
+varying float vPS;
+varying float vPx;
+// Depth-of-field blur widens the point while preserving its total light.
+float pointSetup(float px, float blur) {
+  float sig = max(px / 6.0, SIG_MIN) * blur;
+  vSig = sig;
+  vPx = px;
+  float ps = min(max(px * blur, sig * 7.0), 128.0);
+  vPS = ps;
+  gl_PointSize = ps;
+  float k = min(px / 6.0 / SIG_MIN, 1.0);
+  return k * k / (blur * blur);
+}
+`;
+
+const LENS = /* glsl */ `
+// Model the black hole as a thin lens at the origin. Stretch background stars tangentially and render the opposite image in the secondary pass. The Einstein angle is sqrt(2 rs (Ds-Dl)/(Ds Dl)), consistent with the disk ray tracer. Lensing preserves surface brightness. Inspired by second-brain-black-hole, implemented independently.
+uniform float uLensRs;     // Schwarzschild radius in world units. Zero disables lensing.
+uniform float uSecondary;
+// Exaggerate point lensing slightly to make arcs visible in the overview.
+const float LENS_BOOST = 2.0;
+varying vec2 vAxis;        // Radial direction in sprite coordinates, with Y increasing downward
+varying vec2 vShape;       // Radial and tangential stretch
+float lens(inout vec4 mv) {
+  vAxis = vec2(1.0, 0.0);
+  vShape = vec2(1.0);
+  bool sec = uSecondary > 0.5;
+  vec4 bh = viewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  float Dl = -bh.z, Ds = -mv.z;
+  if (uLensRs <= 0.0 || Dl < 1.0 || Ds <= Dl) return sec ? 0.0 : 1.0;
+  vec2 al = bh.xy / Dl;
+  vec2 d = mv.xy / Ds - al;
+  float beta = length(d);
+  float tE = sqrt(2.0 * LENS_BOOST * uLensRs * (Ds - Dl) / (Ds * Dl));
+  float u = beta / max(tE, 1e-7);
+  if (sec && u > 3.0) return 0.0;
+  vec2 dir = beta > 1e-7 ? d / beta : vec2(1.0, 0.0);
+  float root = sqrt(beta * beta + 4.0 * tE * tE);
+  float th = 0.5 * (beta + (sec ? -root : root));
+  // Restrict lensing to the area near the hole so distant stars, links and hit targets stay aligned.
+  float w = sec ? 1.0 : 1.0 - smoothstep(3.0, 6.0, u);
+  th = mix(beta, th, w);
+  mv.xy = (al + dir * th) * Ds;
+  vAxis = vec2(dir.x, -dir.y);
+  vShape = mix(vec2(1.0), vec2(0.5 * abs(1.0 + (sec ? -beta : beta) / root), min(abs(th) / max(beta, 1e-7), 14.0)), w);
+  // Hide images inside the shadow at 2.6 Schwarzschild radii.
+  float shadow = 2.598 * uLensRs / Dl;
+  return smoothstep(shadow * 0.98, shadow * 1.12, abs(th)) * (sec ? smoothstep(3.0, 1.5, u) : 1.0);
+}
+// Adjust sprite dimensions after pointSetup.
+void lensSprite() {
+  vPS = min(vPS * max(1.0, max(vShape.x, vShape.y)), 160.0);
+  gl_PointSize = vPS;
+}
+`;
+
 // Trace light rays backward through a Schwarzschild field using the Binet equation: d²x/dλ² = -1.5 h² x/r⁵, with conserved h = |x × v| and rs = 1. This produces the shadow, photon ring and lensed far side of the disk. Integrate the vertical Gaussian gas density analytically over each step with erf to avoid grazing-angle banding. The gas thickens outward, rotates differentially and shifts from orange at the rim to cream at the center. Plasma and column integration are adapted from github.com/williamwasen/second-brain-black-hole (src/accretion.js, MIT license).
 export const BH_VERT = /* glsl */ `
 varying vec3 vWorld;
@@ -61,6 +139,9 @@ ${NOISE}
 
 float vn(vec3 p) { return vnoise(p); }
 float fbm3(vec3 p) { return 0.56 * vn(p) + 0.28 * vn(p * 2.03 + 7.1) + 0.16 * vn(p * 4.07 - 3.8); }
+float fbm2(vec3 p) { return 0.64 * vn(p) + 0.36 * vn(p * 2.03 + 7.1); }
+// A value in 0..1 that differs from pixel to pixel, without a visible pattern
+float pixelNoise(vec2 c) { return fract(sin(dot(c, vec2(12.9898, 78.233))) * 43758.5453); }
 
 float erfA(float x) {
   float a = abs(x), t = 1.0 / (1.0 + 0.3275911 * a);
@@ -68,37 +149,68 @@ float erfA(float x) {
   return sign(x) * (1.0 - poly * exp(-a * a));
 }
 
+// Fine structure of the gas at one reading of the winding clock (see plasma): x = bright lanes,
+// y = knots. The gas rotates differentially: after the time wind, radius r has turned by
+// wind * omega(r), so the noise is wound into trailing arcs. Its cells are long along the orbit and
+// short across it. flow is the coarse structure, which warps the fine one.
+vec2 gasField(float a, float r, float wind, float seed, float flow) {
+  float omega = 0.31 * pow(3.4 / r, 1.5);
+  float ph = a - wind * omega;
+  float cp = cos(ph), sp = sin(ph);
+  float drift = r + uTime * 0.018;
+  float detail = fbm2(vec3(cp * 7.0, sp * 7.0, drift * 5.0 - seed) + flow * 2.7 + uTime * 0.038);
+  float fil = fbm2(vec3(cp * 3.0, sp * 3.0, drift * 4.2 + seed * 2.0) + vec3(flow * 2.0, flow * 2.0, flow * 4.0));
+  return vec2(pow(smoothstep(0.24, 0.80, fil), 3.0), pow(smoothstep(0.25, 0.88, detail), 2.0));
+}
+
+// The winding clock runs in a loop: unbounded, the differential rotation would wind the structure
+// ever tighter (fine rings after two minutes, pixel noise after a quarter of an hour). Two readings
+// half a loop apart take turns; one is replaced while only the other shows. Each shows alone for a
+// while (WIND_SOLO of its half loop), so most of the time one reading is enough.
+const float WIND_START = 16.0;
+const float WIND_LOOP = 40.0;
+const float WIND_SOLO = 0.4;
+// Means of gasField(), to keep the contrast while two readings are mixed.
+const vec2 GAS_MEAN = vec2(0.13, 0.17);
+
 // Gas emission at p in Schwarzschild radii. dir points along the backward-traced ray.
 vec3 plasma(vec3 p, vec3 dir, out float dens) {
   vec3 bx = normalize(vec3(uN.y, -uN.x, 0.0));
   vec3 by = normalize(cross(uN, bx));
   float x = dot(p, bx), y = dot(p, by), r = length(vec2(x, y));
-  float win = smoothstep(uRin * 0.95, uRin * 1.17, r) * (1.0 - smoothstep(uRout * 0.71, uRout * 1.07, r));
+  // The outer edge has no rim: the gas thins out over the outer half of the disk.
+  float win = smoothstep(uRin * 0.95, uRin * 1.17, r) * (1.0 - smoothstep(uRout * 0.52, uRout * 1.07, r));
   // A bright ignition front moves outward, leaving glowing gas behind.
   float front = mix(uRin * 0.8, uRout * 1.25, uIgnite);
   float lit = smoothstep(front, front - 2.2, r);
   win *= lit;
   if (win < 0.0001) { dens = 0.0; return vec3(0.0); }
   float a = atan(y, x);
-  // Differential rotation gives the inner disk an orbital period of about 20 seconds.
-  float omega = 0.31 * pow(3.4 / r, 1.5);
-  float ph = a - uTime * omega;
+  // The coarse structure turns as a whole; only the fine one is wound.
+  float ca = cos(a - uTime * 0.11), sa = sin(a - uTime * 0.11);
   float drift = r + uTime * 0.018;
-  vec3 q = vec3(cos(ph), sin(ph), drift * 0.30);
-  float flow = fbm3(q * vec3(4.0, 4.0, 5.0) + vec3(0.0, 0.0, uTime * 0.065));
-  float detail = fbm3(vec3(cos(ph) * 13.0, sin(ph) * 13.0, drift * 2.7) + flow * 2.7 + uTime * 0.038);
-  float fil = fbm3(vec3(cos(ph) * 5.0, sin(ph) * 5.0, drift * 3.8) + vec3(flow * 2.0, flow * 2.0, flow * 4.0));
-  float lanes = pow(smoothstep(0.24, 0.80, fil), 3.0);
-  float knots = pow(smoothstep(0.25, 0.88, detail), 2.0);
-  float energy = (0.10 + lanes * 2.2 + knots * 2.8) * (0.30 + 1.1 * flow);
-  energy *= 0.28 + 1.55 * vn(vec3(cos(ph) * 2.2, sin(ph) * 2.2, uTime * 0.13));
+  float flow = fbm3(vec3(ca * 4.0, sa * 4.0, drift * 1.5 + uTime * 0.065));
+  float f0 = fract(uTime / WIND_LOOP), f1 = fract(uTime / WIND_LOOP + 0.5);
+  float w0 = smoothstep(0.0, 1.0 - WIND_SOLO, 1.0 - abs(2.0 * f0 - 1.0)), w1 = 1.0 - w0;
+  vec2 g0 = w0 > 0.0 ? gasField(a, r, WIND_START + f0 * WIND_LOOP, 0.0, flow) : GAS_MEAN;
+  vec2 g1 = w1 > 0.0 ? gasField(a, r, WIND_START + f1 * WIND_LOOP, 17.0, flow) : GAS_MEAN;
+  vec2 gas = max(GAS_MEAN + (w0 * (g0 - GAS_MEAN) + w1 * (g1 - GAS_MEAN)) / sqrt(w0 * w0 + w1 * w1), 0.0);
+  float lanes = gas.x, knots = gas.y;
+  float energy = (0.10 + lanes * 2.2 + knots * 2.8) * (0.50 + 0.75 * flow);
+  energy *= 0.50 + 1.10 * vn(vec3(ca * 2.2, sa * 2.2, uTime * 0.13));
+  // Outward the gas calms down. With the full contrast only its brightest knots would show there,
+  // as separate patches with black gaps between them.
+  float calm = smoothstep(uRin * 1.3, uRout * 0.8, r);
+  energy = mix(energy, 0.85, calm * 0.72);
   float falloff = pow(3.8 / r, 3.0);
   dens = win * (0.22 + energy * 0.55);
   // Keplerian velocity and Doppler beaming brighten and whiten the approaching side.
   vec3 vel = normalize(cross(uN, p)) * sqrt(0.5 / max(r - 1.0, 1.0));
   float dop = clamp(1.0 / (1.0 + uBeam * dot(vel, dir)), 0.65, 1.65);
-  float heat = clamp(0.85 - (r - 3.0) * 0.075 + knots * 0.25, 0.0, 1.0);
-  vec3 tint = mix(vec3(1.0, 0.27, 0.055), vec3(1.0, 0.80, 0.49), heat);
+  float heat = clamp(0.85 - (r - 3.0) * 0.095 + knots * 0.25, 0.0, 1.0);
+  // Faint gas is cooler: it glows orange. In cream it would lie over the sky as a gray veil.
+  heat *= mix(0.4, 1.0, smoothstep(0.15, 1.1, energy * dop * dop));
+  vec3 tint = mix(vec3(1.0, 0.23, 0.04), vec3(1.0, 0.80, 0.49), heat);
   tint = mix(tint, vec3(1.0, 0.95, 0.82), smoothstep(0.72, 1.0, heat) * 0.62);
   tint = mix(tint, tint * uAccent / max(max(uAccent.r, uAccent.g), max(uAccent.b, 0.001)), uAccentMix);
   float flare = 1.0 + 2.5 * exp(-pow((r - front + 1.1) / 1.3, 2.0)) * (1.0 - uIgnite);
@@ -106,7 +218,9 @@ vec3 plasma(vec3 p, vec3 dir, out float dens) {
 }
 
 // Trace a light ray and return premultiplied color and opacity before applying the shadow.
-vec4 trace(vec3 ro, vec3 rd) {
+// jitter (0..1) shifts the steps along the ray by a part of a step. The emission is sampled once per
+// step; with the same steps on neighboring pixels a ray that grazes the disk would show them as stripes.
+vec4 trace(vec3 ro, vec3 rd, float jitter) {
   float R = uRbound;
   // Approximate the weakly deflected path outside the bounding sphere with a straight line.
   float bq = dot(ro, rd);
@@ -116,7 +230,7 @@ vec4 trace(vec3 ro, vec3 rd) {
     if (disc <= 0.0 || bq > 0.0) return vec4(0.0);
     ro += rd * (-bq - sqrt(disc));
   }
-  vec3 p = ro;
+  vec3 p = ro + rd * (0.045 * length(ro) * jitter);
   vec3 v = rd;
   vec3 hv = cross(p, v);
   float h2 = dot(hv, hv);
@@ -137,8 +251,9 @@ vec4 trace(vec3 ro, vec3 rd) {
     // Integrate the Gaussian gas column perpendicular to the disk over this segment.
     float h0 = dot(p, uN), h1 = dot(pn, uN);
     float dh = h0 - h1;
-    float across = clamp(h0 / (abs(dh) < 1e-5 ? 1e-5 : dh), 0.0, 1.0);
-    vec3 sp = mix(p, pn, across);
+    // The gas is sampled where the step crosses the disk plane, or else in the middle of the step.
+    float cross01 = h0 / (abs(dh) < 1e-5 ? 1e-5 : dh);
+    vec3 sp = mix(p, pn, cross01 > 0.0 && cross01 < 1.0 ? cross01 : 0.5);
     float dR = length(sp - uN * dot(sp, uN));
     float th = 0.075 + 0.009 * dR;
     if ((min(abs(h0), abs(h1)) < th * 3.0 || h0 * h1 < 0.0) && dR < uRout * 1.1) {
@@ -189,7 +304,7 @@ void main() {
       o = vec2(cos(a), sin(a)) * rr;
     }
     vec3 dir = normalize(rd + dx * o.x + dy * o.y);
-    vec4 t = trace(uCam, dir);
+    vec4 t = trace(uCam, dir, pixelNoise(gl_FragCoord.xy + float(k) * 5.3));
     float b = length(cross(uCam, dir));
     float shadow = 1.0 - smoothstep(B_CRIT - fw * 0.5, B_CRIT + fw * 0.5, b);
     t.a += (1.0 - t.a) * shadow;
@@ -231,80 +346,28 @@ void main() {
 
 // Notes and headings are soft point sprites with a core and halo, sized in world units.
 export const STAR_VERT = /* glsl */ `
-// Reveal stars outward from the black hole. uReveal is the front radius in world units.
-uniform float uReveal;
-float reveal(vec3 w) { return 1.0 - smoothstep(uReveal * 0.55, uReveal, length(w)); }
+${REVEAL}
 attribute float aSize;
 attribute vec3 aColor;
 attribute float aAlpha;
 attribute float aPhase;
 attribute float aPulse;
+attribute float aMark;    // 1 for the star under the pointer or in focus: it gets four fine rays
 uniform float uScale;
 uniform float uTime;
 uniform float uMinPx;
+uniform float uDpr;       // Device pixels per CSS pixel
 varying vec3 vColor;
 varying float vAlpha;
-// Dim points behind the focal plane and blur them with distance from it on either side. uFocus is the camera-to-target distance.
-uniform float uFocus;
-float depthFade(float depth) {
-  return mix(1.0, 0.36, smoothstep(uFocus - 150.0, uFocus + 650.0, depth));
-}
-float depthBlur(float depth) {
-  return 1.0 + 1.4 * smoothstep(220.0, 900.0, abs(depth - uFocus));
-}
-// Use a Gaussian width of px/6 with a minimum of 0.8 pixels. Widen and dim smaller points to conserve light and prevent subpixel flicker.
-const float SIG_MIN = 0.8;
-varying float vSig;
-varying float vPS;
-varying float vPx;
-// Depth-of-field blur widens the point while preserving its total light.
-float pointSetup(float px, float blur) {
-  float sig = max(px / 6.0, SIG_MIN) * blur;
-  vSig = sig;
-  vPx = px;
-  float ps = min(max(px * blur, sig * 7.0), 128.0);
-  vPS = ps;
-  gl_PointSize = ps;
-  float k = min(px / 6.0 / SIG_MIN, 1.0);
-  return k * k / (blur * blur);
-}
-// Model the black hole as a thin lens at the origin. Stretch background stars tangentially and render the opposite image in the secondary pass. The Einstein angle is sqrt(2 rs (Ds-Dl)/(Ds Dl)), consistent with the disk ray tracer. Lensing preserves surface brightness. Inspired by second-brain-black-hole, implemented independently.
-uniform float uLensRs;     // Schwarzschild radius in world units. Zero disables lensing.
-uniform float uSecondary;
-// Exaggerate point lensing slightly to make arcs visible in the overview.
-const float LENS_BOOST = 2.0;
-varying vec2 vAxis;        // Radial direction in sprite coordinates, with Y increasing downward
-varying vec2 vShape;       // Radial and tangential stretch
-float lens(inout vec4 mv) {
-  vAxis = vec2(1.0, 0.0);
-  vShape = vec2(1.0);
-  bool sec = uSecondary > 0.5;
-  vec4 bh = viewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-  float Dl = -bh.z, Ds = -mv.z;
-  if (uLensRs <= 0.0 || Dl < 1.0 || Ds <= Dl) return sec ? 0.0 : 1.0;
-  vec2 al = bh.xy / Dl;
-  vec2 d = mv.xy / Ds - al;
-  float beta = length(d);
-  float tE = sqrt(2.0 * LENS_BOOST * uLensRs * (Ds - Dl) / (Ds * Dl));
-  float u = beta / max(tE, 1e-7);
-  if (sec && u > 3.0) return 0.0;
-  vec2 dir = beta > 1e-7 ? d / beta : vec2(1.0, 0.0);
-  float root = sqrt(beta * beta + 4.0 * tE * tE);
-  float th = 0.5 * (beta + (sec ? -root : root));
-  // Restrict lensing to the area near the hole so distant stars, links and hit targets stay aligned.
-  float w = sec ? 1.0 : 1.0 - smoothstep(3.0, 6.0, u);
-  th = mix(beta, th, w);
-  mv.xy = (al + dir * th) * Ds;
-  vAxis = vec2(dir.x, -dir.y);
-  vShape = mix(vec2(1.0), vec2(0.5 * abs(1.0 + (sec ? -beta : beta) / root), min(abs(th) / max(beta, 1e-7), 14.0)), w);
-  // Hide images inside the shadow at 2.6 Schwarzschild radii.
-  float shadow = 2.598 * uLensRs / Dl;
-  return smoothstep(shadow * 0.98, shadow * 1.12, abs(th)) * (sec ? smoothstep(3.0, 1.5, u) : 1.0);
-}
-// Adjust sprite dimensions after pointSetup.
-void lensSprite() {
-  vPS = min(vPS * max(1.0, max(vShape.x, vShape.y)), 160.0);
-  gl_PointSize = vPS;
+varying float vMark;
+varying float vUnit;
+${DEPTH}
+${POINT}
+${LENS}
+// A star stays a point of light when the camera comes close: above the knee its size levels off.
+float capSize(float px) {
+  float knee = 10.0 * uDpr, top = 22.0 * uDpr;
+  return px < knee ? px : knee + (top - knee) * (1.0 - exp(-(px - knee) / (top - knee)));
 }
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
@@ -312,10 +375,17 @@ void main() {
   gl_Position = lensed > 0.0 ? projectionMatrix * mv : vec4(2.0, 2.0, 2.0, 1.0);
   float depth = -mv.z;
   float pulse = aPulse * pow(0.5 + 0.5 * sin(uTime * 2.4 + aPhase * 6.2832), 2.0);
-  float px = max(aSize * uScale / max(depth, 1.0), uMinPx * 0.6) * (1.0 + 0.55 * pulse);
+  float px = capSize(max(aSize * uScale / max(depth, 1.0), uMinPx * 0.6)) * (1.0 + 0.55 * pulse);
   vColor = aColor;
   vAlpha = aAlpha * (1.0 + 0.6 * pulse) * pointSetup(px, depthBlur(depth)) * depthFade(depth) * reveal((modelMatrix * vec4(position, 1.0)).xyz) * lensed;
   lensSprite();
+  // Room for the rays of the marked star
+  vMark = aMark * lensed;
+  vUnit = uDpr;
+  if (aMark > 0.0) {
+    vPS = max(vPS, 96.0 * uDpr);
+    gl_PointSize = vPS;
+  }
 }
 `;
 
@@ -327,6 +397,8 @@ varying float vPS;
 varying float vPx;
 varying vec2 vAxis;
 varying vec2 vShape;
+varying float vMark;
+varying float vUnit;
 void main() {
   vec2 p = (gl_PointCoord * 2.0 - 1.0) * vPS * 0.5;           // Pixel offset from the center
   if (length(p) > vPS * 0.5) discard;
@@ -337,15 +409,18 @@ void main() {
   float core = exp(-rp * rp / (2.0 * vSig * vSig));
   float halo = exp(-rp / max(vPx * 0.22, 1.4)) * 0.5;
   float a = (core * 1.5 + halo) * vAlpha * (vShape.x / sh.x);
+  // The marked star: four fine rays along the axes, concave between them
+  if (vMark > 0.0) {
+    vec2 s = abs(p) / vUnit;
+    a += exp(-s.x * s.y / 5.0) * exp(-length(s) / 13.0) * vMark;
+  }
   gl_FragColor = vec4(vColor * a, 1.0);
 }
 `;
 
 // Compute dust positions from Keplerian orbits with angular velocity sqrt(GM/r³).
 export const DUST_VERT = /* glsl */ `
-// Reveal stars outward from the black hole. uReveal is the front radius in world units.
-uniform float uReveal;
-float reveal(vec3 w) { return 1.0 - smoothstep(uReveal * 0.55, uReveal, length(w)); }
+${REVEAL}
 attribute float aR;
 attribute float aA;
 attribute float aH;
@@ -359,68 +434,11 @@ uniform float uScale;
 uniform vec3 uCenters[32];
 varying vec3 vColor;
 varying float vAlpha;
-// Dim points behind the focal plane and blur them with distance from it on either side. uFocus is the camera-to-target distance.
-uniform float uFocus;
-float depthFade(float depth) {
-  return mix(1.0, 0.36, smoothstep(uFocus - 150.0, uFocus + 650.0, depth));
-}
-float depthBlur(float depth) {
-  return 1.0 + 1.4 * smoothstep(220.0, 900.0, abs(depth - uFocus));
-}
-// Use a Gaussian width of px/6 with a minimum of 0.8 pixels. Widen and dim smaller points to conserve light and prevent subpixel flicker.
-const float SIG_MIN = 0.8;
-varying float vSig;
-varying float vPS;
-varying float vPx;
-// Depth-of-field blur widens the point while preserving its total light.
-float pointSetup(float px, float blur) {
-  float sig = max(px / 6.0, SIG_MIN) * blur;
-  vSig = sig;
-  vPx = px;
-  float ps = min(max(px * blur, sig * 7.0), 128.0);
-  vPS = ps;
-  gl_PointSize = ps;
-  float k = min(px / 6.0 / SIG_MIN, 1.0);
-  return k * k / (blur * blur);
-}
-// Model the black hole as a thin lens at the origin. Stretch background stars tangentially and render the opposite image in the secondary pass. The Einstein angle is sqrt(2 rs (Ds-Dl)/(Ds Dl)), consistent with the disk ray tracer. Lensing preserves surface brightness. Inspired by second-brain-black-hole, implemented independently.
-uniform float uLensRs;     // Schwarzschild radius in world units. Zero disables lensing.
-uniform float uSecondary;
-// Exaggerate point lensing slightly to make arcs visible in the overview.
-const float LENS_BOOST = 2.0;
-varying vec2 vAxis;        // Radial direction in sprite coordinates, with Y increasing downward
-varying vec2 vShape;       // Radial and tangential stretch
-float lens(inout vec4 mv) {
-  vAxis = vec2(1.0, 0.0);
-  vShape = vec2(1.0);
-  bool sec = uSecondary > 0.5;
-  vec4 bh = viewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-  float Dl = -bh.z, Ds = -mv.z;
-  if (uLensRs <= 0.0 || Dl < 1.0 || Ds <= Dl) return sec ? 0.0 : 1.0;
-  vec2 al = bh.xy / Dl;
-  vec2 d = mv.xy / Ds - al;
-  float beta = length(d);
-  float tE = sqrt(2.0 * LENS_BOOST * uLensRs * (Ds - Dl) / (Ds * Dl));
-  float u = beta / max(tE, 1e-7);
-  if (sec && u > 3.0) return 0.0;
-  vec2 dir = beta > 1e-7 ? d / beta : vec2(1.0, 0.0);
-  float root = sqrt(beta * beta + 4.0 * tE * tE);
-  float th = 0.5 * (beta + (sec ? -root : root));
-  // Restrict lensing to the area near the hole so distant stars, links and hit targets stay aligned.
-  float w = sec ? 1.0 : 1.0 - smoothstep(3.0, 6.0, u);
-  th = mix(beta, th, w);
-  mv.xy = (al + dir * th) * Ds;
-  vAxis = vec2(dir.x, -dir.y);
-  vShape = mix(vec2(1.0), vec2(0.5 * abs(1.0 + (sec ? -beta : beta) / root), min(abs(th) / max(beta, 1e-7), 14.0)), w);
-  // Hide images inside the shadow at 2.6 Schwarzschild radii.
-  float shadow = 2.598 * uLensRs / Dl;
-  return smoothstep(shadow * 0.98, shadow * 1.12, abs(th)) * (sec ? smoothstep(3.0, 1.5, u) : 1.0);
-}
-// Adjust sprite dimensions after pointSetup.
-void lensSprite() {
-  vPS = min(vPS * max(1.0, max(vShape.x, vShape.y)), 160.0);
-  gl_PointSize = vPS;
-}
+varying float vMark;      // Dust shares the fragment shader of the stars and is never marked.
+varying float vUnit;
+${DEPTH}
+${POINT}
+${LENS}
 void main() {
   vec3 pos;
   float life = 1.0;
@@ -451,6 +469,8 @@ void main() {
   vAlpha = aBright * 0.55 * max(pointSetup(px, depthBlur(depth)), 0.03) * depthFade(depth)
     * reveal((modelMatrix * vec4(pos, 1.0)).xyz) * lensed;
   lensSprite();
+  vMark = 0.0;
+  vUnit = 1.0;
 }
 `;
 
@@ -460,22 +480,7 @@ uniform float uIntro;
 attribute float aSize;
 attribute float aBright;
 varying float vB;
-// Use a Gaussian width of px/6 with a minimum of 0.8 pixels. Widen and dim smaller points to conserve light and prevent subpixel flicker.
-const float SIG_MIN = 0.8;
-varying float vSig;
-varying float vPS;
-varying float vPx;
-// Depth-of-field blur widens the point while preserving its total light.
-float pointSetup(float px, float blur) {
-  float sig = max(px / 6.0, SIG_MIN) * blur;
-  vSig = sig;
-  vPx = px;
-  float ps = min(max(px * blur, sig * 7.0), 128.0);
-  vPS = ps;
-  gl_PointSize = ps;
-  float k = min(px / 6.0 / SIG_MIN, 1.0);
-  return k * k / (blur * blur);
-}
+${POINT}
 void main() {
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   vB = aBright * pointSetup(aSize, 1.0) * uIntro;
@@ -496,21 +501,12 @@ void main() {
 
 // Graph links
 export const LINE_VERT = /* glsl */ `
-// Reveal stars outward from the black hole. uReveal is the front radius in world units.
-uniform float uReveal;
-float reveal(vec3 w) { return 1.0 - smoothstep(uReveal * 0.55, uReveal, length(w)); }
+${REVEAL}
 attribute vec3 aColor;
 attribute float aAlpha;
 varying vec3 vC;
 varying float vA;
-// Dim points behind the focal plane and blur them with distance from it on either side. uFocus is the camera-to-target distance.
-uniform float uFocus;
-float depthFade(float depth) {
-  return mix(1.0, 0.36, smoothstep(uFocus - 150.0, uFocus + 650.0, depth));
-}
-float depthBlur(float depth) {
-  return 1.0 + 1.4 * smoothstep(220.0, 900.0, abs(depth - uFocus));
-}
+${DEPTH}
 void main() {
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mv;
@@ -621,9 +617,7 @@ void main() {
 
 // Build each nebula from overlapping camera-facing layers at different depths among the cluster's stars. Rotate with the cluster, swirl the gas and fade it near the camera.
 export const NEB_VERT = /* glsl */ `
-// Reveal stars outward from the black hole. uReveal is the front radius in world units.
-uniform float uReveal;
-float reveal(vec3 w) { return 1.0 - smoothstep(uReveal * 0.55, uReveal, length(w)); }
+${REVEAL}
 attribute vec3 aOff;
 attribute float aCl;
 attribute float aSize;

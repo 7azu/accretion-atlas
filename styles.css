@@ -111,18 +111,6 @@
   border-color: rgba(var(--aat-acc), 0.55);
   background: rgba(var(--aat-acc), 0.12);
 }
-.aat-pill-center {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-}
-.aat-root.dash-open .aat-pill-center {
-  border-color: rgba(var(--aat-acc), 0.6);
-  color: #fff;
-}
-.aat-root.is-local .aat-pill-center {
-  display: none;
-}
 
 /* Greeting and local summary */
 .aat-greet,
@@ -136,6 +124,7 @@
 .aat-root.is-local .aat-greet,
 .aat-root:not(.is-local) .aat-local,
 .aat-root.dash-open .aat-greet,
+.aat-root.dash-open .aat-local,
 .aat-root.is-away .aat-greet {
   opacity: 0;
   pointer-events: none;
@@ -158,6 +147,16 @@
   line-height: 1.45;
   color: rgba(255, 255, 255, 0.72);
   margin: 12px 0 18px;
+}
+/* In the greeting the news leads to the dashboard. */
+.aat-greet .aat-news {
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.aat-greet .aat-news:hover,
+.aat-greet .aat-news:focus-visible {
+  color: #fff;
+  outline: none;
 }
 .aat-local-title {
   font-size: 17px;
@@ -301,29 +300,47 @@
   width: 14px;
   height: 14px;
 }
+/* The way into the dashboard: the one button with a name */
+.aat-tb-dash {
+  width: auto;
+  gap: 7px;
+  padding: 0 12px 0 10px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.82);
+}
+.aat-tb-dash:focus-visible {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+.aat-tb-icon {
+  display: flex;
+}
+.aat-tb-sep {
+  align-self: center;
+  width: 1px;
+  height: 14px;
+  margin: 0 3px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.aat-root.is-local .aat-tb-dash,
+.aat-root.is-local .aat-tb-sep {
+  display: none;
+}
 
-/* ---------- Dashboard side panel ----------
-   A sheet on the right: display type for the title and the big numbers, small spaced capitals for
-   labels, numbered sections with a hairline, values in tabular figures. While it opens (is-arriving)
-   the sections rise one after the other, numbers count up, the ring draws itself and the cluster bar
-   grows. --aat-chart is the color chosen for the activity ring; it is the accent of the whole sheet. */
+/* ---------- Dashboard ----------
+   A sheet over the whole view; the galaxy stays behind it, blurred. One card per subject, each with
+   its name in small spaced capitals. Display type for the title and the big numbers, values in tabular
+   figures. While it opens (is-arriving) the cards rise one after the other, numbers count up, the ring
+   draws itself and the cluster bar grows. --aat-chart is the color chosen for the activity ring; it is
+   the accent of the whole sheet. */
 .aat-root {
-  --aat-panel: clamp(340px, 31%, 440px);
   --aat-display: 'Fraunces', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
   --aat-mono: var(--font-monospace, ui-monospace, monospace);
   --aat-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --aat-line: rgba(255, 255, 255, 0.09);
-  --aat-dim: rgba(255, 255, 255, 0.5);
-  --aat-faint: rgba(255, 255, 255, 0.32);
-}
-/* Shift the galaxy and its labels to keep the black hole centered in the available space. */
-.aat-canvas,
-.aat-labels {
-  transition: transform 0.7s var(--aat-ease);
-}
-.aat-root.dash-open .aat-canvas,
-.aat-root.dash-open .aat-labels {
-  transform: translateX(calc(var(--aat-panel) / -2));
+  --aat-line: rgba(255, 255, 255, 0.08);
+  --aat-dim: rgba(255, 255, 255, 0.56);
+  --aat-faint: rgba(255, 255, 255, 0.36);
 }
 .aat-dash {
   --aat-chart: rgb(var(--aat-acc));
@@ -332,104 +349,113 @@
   /* ... and for the marks of the ring, a little less */
   --aat-chart-ink: color-mix(in oklab, var(--aat-chart) 80%, white);
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: var(--aat-panel);
-  display: flex;
-  flex-direction: column;
-  padding: 26px 26px 0 28px;
-  background:
-    radial-gradient(120% 60% at 100% 0%, color-mix(in srgb, var(--aat-chart) 9%, transparent), transparent 70%),
-    linear-gradient(90deg, rgba(9, 9, 11, 0.62), rgba(9, 9, 11, 0.9) 22%);
-  backdrop-filter: blur(18px) saturate(120%);
+  inset: 0;
+  z-index: 6;
+  background: rgba(8, 8, 10, 0.8);
+  backdrop-filter: blur(26px) saturate(120%);
   opacity: 0;
-  pointer-events: none;
-  transform: translateX(36px);
-  transition: opacity 0.4s, transform 0.7s var(--aat-ease);
-}
-/* A hairline along the left edge that lights up in the accent at the height of the head. */
-.aat-dash::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 1px;
-  background: linear-gradient(transparent, color-mix(in srgb, var(--aat-chart) 70%, transparent) 9%, var(--aat-line) 26%, var(--aat-line) 80%, transparent);
+  visibility: hidden;
+  transition: opacity 0.35s ease, visibility 0s 0.35s;
 }
 .aat-dash.is-open {
   opacity: 1;
-  pointer-events: auto;
-  transform: none;
+  visibility: visible;
+  transition: opacity 0.35s ease;
 }
-.aat-root.dash-open .aat-pill-center {
-  background: rgba(255, 255, 255, 0.1);
+/* The controls of the galaxy step back while the sheet is open. */
+.aat-top,
+.aat-toolbar,
+.aat-labels,
+.aat-task-chip {
+  transition: opacity 0.35s ease;
+}
+.aat-root.dash-open .aat-top,
+.aat-root.dash-open .aat-toolbar,
+.aat-root.dash-open .aat-labels,
+.aat-root.dash-open .aat-task-chip {
+  opacity: 0;
+  pointer-events: none;
+}
+/* The sheet sits in the middle of the view when it is smaller than it, and scrolls when it is larger. */
+.aat-dash-scroll {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+.aat-dash-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.aat-dash-page {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: min(100% - 72px, 1360px);
+  margin: auto;
+  /* Room at the bottom for Obsidian's status bar, which floats over the corner of the view */
+  padding: 38px 0 36px;
 }
 
-/* Head: date in small capitals, the title in the display face */
+/* Head: date in small capitals, the greeting in the display face, the search beside it */
 .aat-dash-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
+  gap: 40px;
+  margin-bottom: 26px;
+}
+.aat-dash-title {
+  min-width: 0;
 }
 .aat-dash-date {
   font-family: var(--aat-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.2em;
+  font-size: 11px;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--aat-chart-text);
 }
 .aat-dash-name {
-  margin-top: 6px;
+  margin: 8px 0 0;
   font-family: var(--aat-display);
-  font-size: 34px;
+  font-size: 46px;
   font-weight: 380;
   line-height: 1.05;
   letter-spacing: -0.02em;
   color: #fff;
 }
-.aat-close {
-  width: 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--aat-line);
-  border-radius: 999px;
+.aat-dash-lede {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--aat-dim);
-  cursor: pointer;
-  transition: color 0.25s, border-color 0.25s, transform 0.5s var(--aat-ease);
 }
-.aat-close:hover {
-  color: #fff;
-  border-color: color-mix(in srgb, var(--aat-chart) 60%, transparent);
-  transform: rotate(90deg);
-}
-.aat-close svg,
-.aat-search-icon svg {
-  width: 14px;
-  height: 14px;
-}
-
-/* Search: a quiet box that takes the accent while it has the keyboard */
-.aat-search {
+.aat-dash-tools {
+  flex: 0 1 460px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 20px 0 2px;
-  padding: 0 12px;
-  height: 38px;
-  border: 1px solid var(--aat-line);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
+  gap: 12px;
+  min-width: 0;
+}
+.aat-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  transition: border-color 0.25s, background 0.25s;
   cursor: text;
 }
 .aat-search:focus-within {
-  border-color: color-mix(in srgb, var(--aat-chart) 70%, transparent);
-  background: rgba(255, 255, 255, 0.05);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--aat-chart) 12%, transparent);
+  border-color: color-mix(in srgb, var(--aat-chart) 55%, transparent);
+  background: rgba(255, 255, 255, 0.08);
 }
 .aat-search-icon {
   display: flex;
@@ -438,6 +464,11 @@
 }
 .aat-search:focus-within .aat-search-icon {
   color: var(--aat-chart-text);
+}
+.aat-search-icon svg,
+.aat-close svg {
+  width: 16px;
+  height: 16px;
 }
 .aat-search input,
 .aat-search input:focus,
@@ -450,142 +481,264 @@
   padding: 0;
   height: auto;
   background: transparent;
-  font-size: 12.5px;
+  font-size: 14px;
   font-family: inherit;
   color: #fff;
 }
 .aat-search input::placeholder {
   color: var(--aat-faint);
 }
-.aat-dash-body {
-  flex: 1;
-  overflow-y: auto;
-  margin-right: -14px;
-  padding: 0 14px 22px 0;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+.aat-close {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--aat-dim);
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
 }
-.aat-dash-body::-webkit-scrollbar {
-  width: 6px;
+.aat-close:hover,
+.aat-close:focus-visible {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  outline: none;
 }
 
-/* Sections: number, name, a hairline to the edge */
-.aat-sec {
-  padding-top: 26px;
+/* Cards in two columns: the wide one with what happened and what is to do, the narrow one with what
+   there is. Both columns end at the same height. */
+.aat-dash-body {
+  flex: 1;
 }
-.aat-dash.is-arriving .aat-sec,
-.aat-dash.is-arriving .aat-search,
+.aat-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.aat-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.aat-pair {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.aat-card {
+  min-width: 0;
+  padding: 20px 24px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.aat-card-clusters {
+  flex: 1;
+}
+.aat-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 26px;
+  margin-bottom: 14px;
+}
+.aat-card-label,
+.aat-card-note {
+  font-family: var(--aat-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.aat-card-label {
+  color: rgba(255, 255, 255, 0.66);
+}
+.aat-card-note {
+  color: var(--aat-faint);
+}
+.aat-note {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--aat-faint);
+}
+.aat-more {
+  margin-top: 8px;
+}
 .aat-dash.is-arriving .aat-dash-head,
+.aat-dash.is-arriving .aat-card,
 .aat-dash.is-arriving .aat-dash-foot {
   animation: aat-rise 0.8s var(--aat-ease) both;
-  animation-delay: calc(90ms + var(--i, 0) * 75ms);
-}
-.aat-dash.is-arriving .aat-dash-head {
-  animation-delay: 0ms;
-}
-.aat-dash.is-arriving .aat-search {
-  animation-delay: 60ms;
+  animation-delay: calc(60ms + var(--i, 0) * 70ms);
 }
 .aat-dash.is-arriving .aat-dash-foot {
-  animation-delay: 700ms;
+  animation-delay: 520ms;
 }
 @keyframes aat-rise {
   from {
     opacity: 0;
-    transform: translateY(18px);
+    transform: translateY(16px);
   }
 }
-.aat-sec-head {
-  display: flex;
+@keyframes aat-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* A small button in a card */
+.aat-chip-btn {
+  flex: none;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-.aat-sec-no {
-  font-family: var(--aat-display);
-  font-style: italic;
-  font-size: 13px;
-  color: var(--aat-chart-text);
-  letter-spacing: 0.06em;
-}
-.aat-sec-label,
-.aat-sec-note {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
   font-family: var(--aat-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.2em;
+  font-size: 10px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   white-space: nowrap;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
 }
-.aat-sec-label {
-  color: rgba(255, 255, 255, 0.78);
-}
-.aat-sec-note {
-  color: var(--aat-faint);
-}
-.aat-sec-rule {
-  flex: 1;
-  height: 1px;
-  background: var(--aat-line);
-  transform-origin: left;
-}
-.aat-dash.is-arriving .aat-sec-rule {
-  animation: aat-rule 0.9s var(--aat-ease) both;
-  animation-delay: calc(200ms + var(--i, 0) * 75ms);
-}
-@keyframes aat-rule {
-  from {
-    transform: scaleX(0);
-  }
-}
-.aat-note {
-  font-size: 10.5px;
-  line-height: 1.55;
-  color: var(--aat-faint);
+.aat-chip-btn:hover,
+.aat-chip-btn:focus-visible {
+  color: #fff;
+  background: color-mix(in srgb, var(--aat-chart) 26%, rgba(255, 255, 255, 0.07));
+  outline: none;
 }
 
-/* Color swatches */
-.aat-swatches {
+/* Lists: the name, a value on the right. The row under the pointer lights up as a whole. */
+.aat-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -10px;
+}
+.aat-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  transition: color 0.18s, background 0.18s;
+}
+.aat-row:hover,
+.aat-row:focus-visible,
+.aat-row.is-hot {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+  outline: none;
+}
+.aat-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aat-row-val {
+  flex: none;
+  font-family: var(--aat-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--aat-dim);
+}
+.aat-row.is-overdue .aat-row-val {
+  color: #ff8f80;
+}
+.aat-row.is-soon .aat-row-val {
+  color: #ffc98a;
+}
+/* The color of a cluster, in front of its name */
+.aat-row-dot {
+  order: -1;
+  flex: none;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* Big numbers side by side */
+.aat-nums {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.aat-big {
+  font-family: var(--aat-display);
+  font-size: 42px;
+  font-weight: 340;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+.aat-small {
+  margin-top: 6px;
+  font-family: var(--aat-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--aat-dim);
+}
+/* Tasks: the three states in their star colors */
+.aat-task-nums .is-overdue .aat-big {
+  color: #ff8f80;
+}
+.aat-task-nums .is-open .aat-big {
+  color: #ffc98a;
+}
+.aat-task-nums .is-partial .aat-big {
+  color: #f0e29c;
+}
+
+/* Activity: the ring on the left, the notes of the chosen day (or the last edited ones) beside it */
+.aat-act {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 36px;
 }
-.aat-sw {
-  position: relative;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  cursor: pointer;
-  opacity: 0.5;
-  transition: opacity 0.2s, transform 0.35s var(--aat-ease), box-shadow 0.2s;
+.aat-act-ring {
+  flex: 0 0 clamp(220px, 38%, 296px);
+  min-width: 0;
 }
-.aat-sw:hover {
-  opacity: 1;
-  transform: scale(1.35);
+.aat-act-list {
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
 }
-.aat-sw.is-on {
-  opacity: 1;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.9), 0 0 0 3px rgba(255, 255, 255, 0.7), 0 0 10px currentColor;
+.aat-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 30px;
+  margin-bottom: 8px;
 }
-.aat-sw-custom {
-  margin-left: 3px;
-  background: conic-gradient(from 90deg, #e8a87c, #d4a5c9, #9fb7d8, #a5d4b8, #e8d18c, #e8a87c);
+.aat-list-title {
+  font-family: var(--aat-display);
+  font-size: 21px;
+  font-weight: 380;
+  letter-spacing: -0.01em;
+  color: #fff;
 }
-.aat-sw-custom input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  border: none;
-  cursor: pointer;
-}
-
-/* Activity ring */
 .aat-ring {
   position: relative;
-  width: min(100%, 290px);
-  margin: 2px auto 0;
+  width: 100%;
   aspect-ratio: 1;
 }
 .aat-ring svg {
@@ -611,13 +764,12 @@
 }
 .aat-ring-now {
   fill: var(--aat-chart-ink);
-  filter: drop-shadow(0 0 3px var(--aat-chart-ink));
 }
 .aat-tick-bar {
   stroke: var(--aat-chart-ink);
   stroke-width: 2;
   stroke-linecap: round;
-  transition: stroke-width 0.2s, stroke 0.2s;
+  transition: stroke 0.2s;
 }
 /* The bars draw themselves outwards, one day after the other */
 .aat-dash.is-arriving .aat-tick-bar {
@@ -636,14 +788,6 @@
     stroke-dashoffset: 0;
   }
 }
-@keyframes aat-fade {
-  from {
-    opacity: 0;
-  }
-}
-.aat-tick.is-today .aat-tick-bar {
-  filter: drop-shadow(0 0 3px var(--aat-chart-ink));
-}
 .aat-tick-zero {
   fill: rgba(255, 255, 255, 0.16);
 }
@@ -658,7 +802,6 @@
 .aat-tick.is-hover .aat-tick-bar,
 .aat-tick.is-picked .aat-tick-bar {
   stroke: #fff;
-  stroke-width: 3;
   stroke-opacity: 1;
 }
 .aat-tick.is-hover .aat-tick-zero,
@@ -684,7 +827,7 @@
 }
 .aat-ring-num {
   font-family: var(--aat-display);
-  font-size: 44px;
+  font-size: 46px;
   font-weight: 340;
   line-height: 1;
   letter-spacing: -0.03em;
@@ -695,263 +838,109 @@
   white-space: nowrap;
   margin-top: 7px;
   font-family: var(--aat-mono);
-  font-size: 8.5px;
-  letter-spacing: 0.16em;
+  font-size: 9px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--aat-dim);
 }
 .aat-ring-sub {
   white-space: nowrap;
   margin-top: 3px;
-  font-size: 9.5px;
+  font-size: 10px;
   color: var(--aat-faint);
 }
-.aat-daylist {
-  margin-top: 10px;
+/* What the marks of the ring mean */
+.aat-ring-key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 4px;
+  font-family: var(--aat-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--aat-faint);
 }
-.aat-day-head {
-  margin-bottom: 4px;
-  font-family: var(--aat-display);
-  font-size: 15px;
-  color: var(--aat-chart-text);
+.aat-key-bar {
+  width: 12px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--aat-chart-ink);
+}
+.aat-key-dot {
+  width: 5px;
+  height: 5px;
+  margin-left: 12px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.78);
 }
 
-/* Big numbers in one row, hairlines between them */
-.aat-nums {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-bottom: 12px;
-}
-.aat-numcell {
-  padding: 2px 14px;
-  border-left: 1px solid var(--aat-line);
-}
-.aat-numcell:first-child {
-  padding-left: 0;
-  border-left: none;
-}
-.aat-big {
-  font-family: var(--aat-display);
-  font-size: 32px;
-  font-weight: 340;
-  line-height: 1.05;
-  letter-spacing: -0.03em;
-  font-variant-numeric: tabular-nums;
-  color: #fff;
-}
-.aat-small {
-  margin-top: 5px;
-  font-family: var(--aat-mono);
-  font-size: 8.5px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--aat-dim);
-}
-/* Tasks: the three states in their star colors */
-.aat-task-nums .is-overdue .aat-big {
-  color: #ff8f80;
-}
-.aat-task-nums .is-open .aat-big {
-  color: #ffc98a;
-}
-.aat-task-nums .is-partial .aat-big {
-  color: #f0e29c;
-}
-.aat-dash button.aat-chip-btn,
-.aat-dash button.aat-chip-btn:hover,
-.aat-dash button.aat-chip-btn:focus {
-  height: 22px;
-  padding: 0 10px;
-  border: 1px solid var(--aat-line);
-  border-radius: 999px;
-  background: transparent;
-  box-shadow: none;
-  font-family: var(--aat-mono);
-  font-size: 8.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--aat-dim);
-  cursor: pointer;
-  transition: color 0.25s, border-color 0.25s, background 0.25s;
-}
-.aat-dash button.aat-chip-btn:hover {
-  color: #fff;
-  border-color: color-mix(in srgb, var(--aat-chart) 60%, transparent);
-  background: color-mix(in srgb, var(--aat-chart) 10%, transparent);
-}
-
-/* Cluster spectrum and legend */
+/* Clusters: one bar in their colors, the list below */
 .aat-spectrum {
   display: flex;
-  gap: 2px;
-  height: 8px;
-  margin-bottom: 14px;
+  gap: 3px;
+  height: 10px;
+  margin-bottom: 12px;
 }
 .aat-spectrum i {
   min-width: 0;
-  border-radius: 2px;
+  border-radius: 3px;
   cursor: pointer;
-  transition: flex-grow 1.1s var(--aat-ease), opacity 0.25s, transform 0.35s var(--aat-ease), filter 0.25s;
+  transition: flex-grow 1.1s var(--aat-ease), opacity 0.25s;
 }
 .aat-spectrum.has-hot i {
-  opacity: 0.28;
+  opacity: 0.25;
 }
 .aat-spectrum i.is-hot {
   opacity: 1;
-  transform: scaleY(1.6);
-  filter: drop-shadow(0 0 6px currentColor);
-}
-.aat-legend {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 18px;
-}
-.aat-leg {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  border-top: 1px solid var(--aat-line);
-  font-size: 11px;
-  cursor: pointer;
-  transition: color 0.2s, padding 0.35s var(--aat-ease);
-  color: rgba(255, 255, 255, 0.72);
-}
-.aat-leg:hover,
-.aat-leg.is-hot {
-  color: #fff;
-  padding-left: 4px;
-}
-.aat-leg-dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-.aat-leg-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.aat-leg-val {
-  font-family: var(--aat-mono);
-  font-size: 9.5px;
-  font-variant-numeric: tabular-nums;
-  color: var(--aat-faint);
 }
 
-/* Lists: place, name, value. A line in the accent runs in from the left on hover */
-.aat-lead {
-  position: relative;
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 7px 0;
-  border-top: 1px solid var(--aat-line);
-  font-size: 12px;
-  cursor: pointer;
-  color: rgba(255, 255, 255, 0.78);
-  transition: color 0.2s, padding 0.4s var(--aat-ease);
-}
-.aat-lead::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -1px;
-  height: 1px;
-  background: var(--aat-chart);
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform 0.5s var(--aat-ease);
-}
-.aat-lead:hover {
-  color: #fff;
-  padding-left: 6px;
-}
-.aat-lead:hover::after {
-  transform: scaleX(1);
-}
-.aat-lead-no {
-  flex: none;
-  font-family: var(--aat-mono);
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-  color: var(--aat-faint);
-}
-.aat-lead-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.aat-lead-val {
-  flex: none;
-  font-family: var(--aat-mono);
-  font-size: 9.5px;
-  font-variant-numeric: tabular-nums;
-  color: var(--aat-dim);
-}
-.aat-lead.is-overdue .aat-lead-val {
-  color: #ff8f80;
-}
-.aat-lead.is-soon .aat-lead-val {
-  color: #ffc98a;
-}
-
-/* Search results */
+/* Search results: they take the place of the cards */
 .aat-results {
-  margin-top: 14px;
   display: flex;
   flex-direction: column;
+  margin: 0 -10px;
 }
 .aat-result {
-  position: relative;
-  padding: 10px 0 10px 12px;
-  border-top: 1px solid var(--aat-line);
+  padding: 11px 10px;
+  border-radius: 10px;
   cursor: pointer;
-  transition: background 0.25s, padding 0.4s var(--aat-ease);
-  animation: aat-rise 0.5s var(--aat-ease) both;
-}
-.aat-result::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 2px;
-  border-radius: 2px;
-  background: var(--aat-chart);
-  transform: scaleY(0);
-  transition: transform 0.4s var(--aat-ease);
+  transition: background 0.18s;
 }
 .aat-result:hover,
+.aat-result:focus-visible,
 .aat-result.is-active {
-  padding-left: 16px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05), transparent);
+  background: rgba(255, 255, 255, 0.07);
+  outline: none;
 }
-.aat-result:hover::before,
-.aat-result.is-active::before {
-  transform: scaleY(1);
+.aat-r-top {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
 }
 .aat-r-title {
-  font-size: 12.5px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
   font-weight: 600;
   color: #fff;
 }
 .aat-r-cl {
-  margin: 2px 0 3px;
+  flex: none;
   font-family: var(--aat-mono);
-  font-size: 8.5px;
-  letter-spacing: 0.16em;
+  font-size: 10px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--aat-faint);
 }
 .aat-r-snip {
-  font-size: 11px;
+  max-width: 120ch;
+  margin-top: 4px;
+  font-size: 12.5px;
   line-height: 1.5;
   color: var(--aat-dim);
   overflow: hidden;
@@ -961,60 +950,133 @@
 }
 .aat-r-snip mark {
   background: none;
-  color: #fff;
-  border-bottom: 1px solid var(--aat-chart);
+  color: var(--aat-chart-text);
 }
 .aat-noresult {
-  padding: 26px 0 6px;
+  padding: 6px 0 10px;
   font-family: var(--aat-display);
   font-style: italic;
-  font-size: 16px;
+  font-size: 18px;
   color: var(--aat-dim);
 }
 
-/* Signature at the end of the sheet */
+/* Foot: the plugin and the vault, on the right the accent of the sheet */
 .aat-dash-foot {
   display: flex;
-  gap: 12px;
-  margin-top: 30px;
-  padding-top: 12px;
-  border-top: 1px solid var(--aat-line);
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px;
+  padding: 0 4px;
   font-family: var(--aat-mono);
-  font-size: 8.5px;
-  letter-spacing: 0.2em;
+  font-size: 10px;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--aat-faint);
 }
-.aat-dash-foot-vault {
+.aat-dash-accent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-left: auto;
-  color: var(--aat-chart-text);
+}
+.aat-swatches {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.aat-sw {
+  position: relative;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.2s, box-shadow 0.2s;
+}
+.aat-sw:hover,
+.aat-sw:focus-visible {
+  opacity: 1;
+  outline: none;
+}
+.aat-sw.is-on {
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(12, 12, 14, 1), 0 0 0 3px rgba(255, 255, 255, 0.7);
+}
+.aat-sw-custom {
+  margin-left: 2px;
+  background: conic-gradient(from 90deg, #e8a87c, #d4a5c9, #9fb7d8, #a5d4b8, #e8d18c, #e8a87c);
+}
+.aat-sw-custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  cursor: pointer;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .aat-canvas,
-  .aat-labels,
   .aat-dash,
+  .aat-dash.is-open,
   .aat-spectrum i,
-  .aat-lead,
-  .aat-lead::after,
+  .aat-row,
   .aat-result {
     transition: none;
     animation: none;
   }
 }
 
-/* Use the full view width for the panel in narrow sidebars. */
-@container (max-width: 640px) {
-  .aat-root {
-    --aat-panel: 100%;
-  }
-  .aat-root.dash-open .aat-canvas,
-  .aat-root.dash-open .aat-labels {
-    transform: none;
-  }
-}
+/* The sheet is scaled to the view (Dashboard._fit). A narrow view, such as a sidebar, stacks the columns. */
 .workspace-leaf-content[data-type="accretion-atlas"] .view-content.aat-view {
   container-type: size;
+}
+/* A list that has the full width of the wide column to itself runs in two columns. */
+@container (min-width: 981px) {
+  .aat-pair > .aat-card:only-child .aat-rows {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(3, auto);
+    grid-auto-columns: minmax(0, 1fr);
+    column-gap: 28px;
+  }
+}
+@container (max-width: 980px) {
+  .aat-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@container (max-width: 700px) {
+  .aat-dash-page {
+    width: calc(100% - 36px);
+    padding-top: 26px;
+  }
+  .aat-dash-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 20px;
+    margin-bottom: 22px;
+  }
+  .aat-dash-tools {
+    flex: none;
+  }
+  .aat-dash-name {
+    font-size: 36px;
+  }
+  .aat-act {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 20px;
+  }
+  .aat-act-ring {
+    flex: none;
+    width: min(100%, 280px);
+    margin: 0 auto;
+  }
+  .aat-card {
+    padding: 18px 18px 16px;
+  }
 }
 @container (max-width: 520px) {
   .aat-greet,
@@ -1023,6 +1085,9 @@
   }
   .aat-greet .aat-up,
   .aat-greet .aat-section-title {
+    display: none;
+  }
+  .aat-tb-dash span:not(.aat-tb-icon) {
     display: none;
   }
 }
@@ -1107,7 +1172,7 @@
   text-transform: uppercase;
   fill: rgba(255, 244, 232, 0.66);
   filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 6px rgba(0, 0, 0, 0.7));
-  transition: fill 0.3s, letter-spacing 0.4s;
+  transition: fill 0.3s, letter-spacing 0.4s, opacity 0.3s;
 }
 .aat-root.is-local .aat-hole-text {
   letter-spacing: 0.16em;
@@ -1490,11 +1555,6 @@ body.aat-solo .workspace-tabs:has(.aat-solo-leaf) {
 @keyframes aat-hole-open {
   from { --aat-hole-r: 0px; }
   to { --aat-hole-r: 190vmax; }
-}
-
-/* ---------- Toolbar ---------- */
-.aat-root.dash-open .aat-toolbar {
-  transform: translateX(calc(-50% - var(--aat-panel) / 2));
 }
 
 .aat-tb.is-active {

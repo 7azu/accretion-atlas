@@ -220,7 +220,7 @@ function buildStats(model, pages) {
     },
     byCluster: [...model.clusters].sort((a, b) => b.ideas - a.ideas),
     mostConnected: [...pages].sort((a, b) => b.degree - a.degree).slice(0, 6),
-    recent: [...pages].sort((a, b) => b.mtime - a.mtime).slice(0, 6),
+    recent: [...pages].sort((a, b) => b.mtime - a.mtime).slice(0, 8),
     comingUp: comingUp.slice(0, 4),
     pagesList: pages,
     activity: activity(pages, 84),

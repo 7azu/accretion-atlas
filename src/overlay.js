@@ -1,15 +1,9 @@
 // HTML controls and labels over the 3D scene.
 import { setIcon, Component } from 'obsidian';
 
-import { taskState } from './galaxy.js';
-import { DAY } from './model.js';
-function el(tag, cls, parent, text) {
-  const e = parent.ownerDocument.createElement(tag);
-  if (cls) e.className = cls;
-  if (text != null) e.textContent = text;
-  parent.appendChild(e);
-  return e;
-}
+import { taskState, LABEL_FADE } from './galaxy.js';
+import { Dashboard } from './dashboard.js';
+import { el, clickable, fmtDay, ago, greeting, newsLine, dueText } from './util.js';
 
 // Loading screen for the desktop launcher (plugin setting, Linux): covers the window with a quiet star
 // field until the first frame of the galaxy is drawn, then opens from the place of the black hole.
@@ -85,30 +79,6 @@ export class LaunchLoadingScreen {
     this.element.remove();
   }
 }
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const fmtDay = (t) => {
-  const d = new Date(t);
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
-};
-function ago(t) {
-  const s = (Date.now() - t) / 1000;
-  if (s < 90) return 'just now';
-  if (s < 3600) return `${Math.round(s / 60)} minutes ago`;
-  if (s < 2 * 3600) return 'an hour ago';
-  if (s < 86400) return `${Math.round(s / 3600)} hours ago`;
-  if (s < 2 * 86400) return 'yesterday';
-  return `${Math.round(s / 86400)} days ago`;
-}
-function greeting() {
-  const h = new Date().getHours();
-  if (h < 5) return 'Good night.';
-  if (h < 12) return 'Good morning.';
-  if (h < 18) return 'Good afternoon.';
-  if (h < 23) return 'Good evening.';
-  return 'Good night.';
-}
-
 export class Overlay {
   constructor(root, view) {
     this.root = root;
@@ -127,9 +97,7 @@ export class Overlay {
     const top = el('div', 'aat-top', root);
     const brand = el('div', 'aat-brand', top);
     this.titleEl = el('div', 'aat-title', brand, 'Galaxy');
-    this.subEl = el('div', 'aat-sub', brand, '');
-    this.homePill = el('div', 'aat-pill aat-pill-center', top, 'Home');
-    this.homePill.addEventListener('click', () => this.toggleDash());
+    this.subEl = el('div', 'aat-sub', brand, view.app.vault.getName());
     this.modePill = el('div', 'aat-pill', top, '');
     this.modePill.addEventListener('click', () => view.toggleMode());
 
@@ -141,8 +109,13 @@ export class Overlay {
     this.empty = el('div', 'aat-empty', root);
     this.empty.setAttribute('role', 'status');
 
-    // Toolbar
+    // Toolbar: the way into the dashboard with its name, then the controls of the view as icons
     const tb = el('div', 'aat-toolbar', root);
+    this.dashBtn = clickable(el('div', 'aat-tb aat-tb-dash', tb), () => this.toggleDash());
+    setIcon(el('span', 'aat-tb-icon', this.dashBtn), 'layout-dashboard');
+    el('span', '', this.dashBtn, 'Dashboard');
+    this.dashBtn.setAttribute('aria-label', 'Open the dashboard (Tab)');
+    el('i', 'aat-tb-sep', tb);
     const btn = (icon, title, fn) => {
       const b = el('div', 'aat-tb', tb);
       b.setAttribute('aria-label', title);
@@ -162,15 +135,50 @@ export class Overlay {
       else root.requestFullscreen?.();
     });
 
-    // Dashboard
-    this.dash = el('div', 'aat-dash', root);
+    // Dashboard, above everything else. Tab or "/" on the galaxy opens it, Escape leaves it.
+    this.dashboard = new Dashboard(root, view, this);
+    // Keys of the galaxy itself, while the view (not a field in it) has the keyboard: arrows turn,
+    // plus and minus zoom, Space pauses, Escape returns to the starting view.
+    const held = new Set();
+    const turn = () => {
+      const on = (k) => (held.has(k) ? 1 : 0);
+      view.galaxy?.setOrbitInput(on('ArrowLeft') - on('ArrowRight'), on('ArrowUp') - on('ArrowDown'));
+    };
     this._onKey = (e) => {
-      if (e.key === 'Escape' && this.dash.classList.contains('is-open')) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (this.dashboard.isOpen) {
+        if (e.key !== 'Escape') return;
         e.preventDefault();
-        this.toggleDash(false);
+        this.dashboard.escape();
+        return;
       }
+      if (e.target !== root) return;
+      const g = view.galaxy;
+      if ((e.key === 'Tab' && !e.shiftKey) || e.key === '/') {
+        if (this.mode === 'local') return;
+        this.toggleDash(true);
+      } else if (e.key.startsWith('Arrow')) {
+        held.add(e.key);
+        turn();
+      } else if (e.key === '+' || e.key === '=') g?.zoomBy(0.72);
+      else if (e.key === '-') g?.zoomBy(1.35);
+      else if (e.key === ' ') this.togglePause();
+      // Away from the starting view Escape leads back to it. There it is left to Obsidian, which
+      // returns to the note edited last.
+      else if (e.key === 'Escape' && this.root.classList.contains('is-away')) g?.home();
+      else return;
+      e.preventDefault();
+    };
+    this._onKeyUp = (e) => {
+      if (held.delete(e.key)) turn();
+    };
+    this._onBlur = () => {
+      held.clear();
+      turn();
     };
     root.addEventListener('keydown', this._onKey);
+    root.addEventListener('keyup', this._onKeyUp);
+    root.addEventListener('focusout', this._onBlur);
   }
 
   // Solo: the galaxy fills the window like an app of its own (desktop launcher). Then a button leads
@@ -184,10 +192,6 @@ export class Overlay {
     g.setPaused(!g.paused);
     setIcon(this.pauseBtn, g.paused ? 'play' : 'pause');
     this.pauseBtn.setAttribute('aria-label', g.paused ? 'Resume motion' : 'Pause motion');
-  }
-
-  setFps(fps) {
-    this.subEl.textContent = `${this.view.app.vault.getName()} · ${fps} fps`;
   }
 
   // View state
@@ -219,6 +223,9 @@ export class Overlay {
         lab._name = el('span', '', name);
         lab._sub = el('div', 'aat-csub', lab);
         lab.addEventListener('click', () => this.view.galaxy?.flyToCluster(c.key));
+        // The name under the pointer lights its cluster and dims the others.
+        lab.addEventListener('pointerenter', () => this.view.galaxy?.setClusterHover(c.key));
+        lab.addEventListener('pointerleave', () => this.view.galaxy?.setClusterHover(null));
         this.labels.set(c.key, lab);
       }
       lab._name.textContent = c.name;
@@ -236,7 +243,8 @@ export class Overlay {
     this._setHoleText(mode === 'local' ? data?.info?.name || '' : 'Home');
     if (mode === 'global') this._buildGreeting(stats, extra.prevVisit);
     else this._buildLocal(data?.info);
-    if (this.dash.classList.contains('is-open') && !this.query) this._buildDashHome();
+    if (mode === 'local') this.toggleDash(false);
+    this.dashboard.refresh();
   }
 
   // Show the interface after the scene appears.
@@ -288,25 +296,19 @@ export class Overlay {
   _buildGreeting(stats, prevVisit) {
     const g = this.greet;
     g.empty();
-    el('h2', '', g, greeting());
+    el('h2', '', g, greeting(this.view.plugin.userName()));
     if (prevVisit) el('div', 'aat-since', g, `Last here: ${ago(prevVisit)}`);
-    const changed = prevVisit ? stats.pagesList.filter((p) => p.mtime > prevVisit).length : stats.updatedWeek;
-    const news = prevVisit
-      ? changed
-        ? `${changed} ${changed === 1 ? 'note was' : 'notes were'} edited since your last visit.`
-        : 'No new notes or changes since your last visit.'
-      : `${changed} ${changed === 1 ? 'note' : 'notes'} edited this week.`;
-    el('div', 'aat-news', g, news);
+    // The news is the short form of the dashboard and leads there.
+    const news = clickable(el('div', 'aat-news', g, newsLine(stats, prevVisit)), () => this.toggleDash(true));
+    news.setAttribute('aria-label', 'Open the dashboard');
     if (stats.comingUp.length) {
       el('div', 'aat-section-title', g, 'Upcoming');
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
       for (const it of stats.comingUp) {
         const row = el('div', 'aat-up', g);
-        const days = Math.round((it.due - today.getTime()) / DAY);
-        const d = el('span', 'aat-up-date', row, days < 0 ? `since ${fmtDay(it.due)}` : days === 0 ? 'today' : days === 1 ? 'tomorrow' : `due ${fmtDay(it.due)}`);
-        if (days < 0) d.classList.add('is-overdue');
-        else if (days <= 7) d.classList.add('is-soon');
+        const due = dueText(it.due);
+        const d = el('span', 'aat-up-date', row, due.days > 1 ? `due ${due.text}` : due.text);
+        if (due.overdue) d.classList.add('is-overdue');
+        else if (due.soon) d.classList.add('is-soon');
         el('span', 'aat-up-title', row, it.title + (it.status === 'partial' ? ' (partial)' : ''));
         row.title = 'Click: fly there · Double-click: open';
         row.addEventListener('click', () => {
@@ -370,6 +372,10 @@ export class Overlay {
     const now = performance.now();
     const dt = Math.min(0.1, (now - (this._labT || now)) / 1000);
     this._labT = now;
+    // Far away the names would pile up on a small spot: they fade out before the camera gets there.
+    const camDist = g.camera.position.distanceTo(g.controls.target);
+    const farK = Math.min(1, Math.max(0, (camDist - LABEL_FADE[0]) / (LABEL_FADE[1] - LABEL_FADE[0])));
+    const near = 1 - farK * farK * (3 - 2 * farK);
     for (const [lab, q] of order) {
       const w = (lab._lw ||= Math.max(60, lab._name.textContent.length * 7.5 + 20));
       let slot = 0;
@@ -400,9 +406,9 @@ export class Overlay {
         lab._fading = fading;
         lab.style.transition = fading ? 'none' : '';
       }
-      const o = Math.max(0.28, Math.min(1, 1.5 - q.depth / 2200)) * lab._fade;
+      const o = Math.max(0.28, Math.min(1, 1.5 - q.depth / 2200)) * lab._fade * near;
       lab.style.opacity = o > 0.004 ? o.toFixed(3) : '0';
-      lab.style.pointerEvents = lab._fade > 0.5 ? '' : 'none';
+      lab.style.pointerEvents = lab._fade > 0.5 && near > 0.4 ? '' : 'none';
       lab.style.transform = `translate(${q.x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%)`;
     }
     // Update the nearby-note selection every few frames and track positions in between.
@@ -430,7 +436,7 @@ export class Overlay {
     this.root.classList.toggle('is-away', away);
     // Reserve space for the header, toolbar and greeting or local summary.
     const W = g.width, H = g.height;
-    const taken = [{ x: 0, y: 0, w: W, h: 64 }, { x: W / 2 - 110, y: H - 64, w: 220, h: 64 }];
+    const taken = [{ x: 0, y: 0, w: W, h: 64 }, { x: W / 2 - 180, y: H - 64, w: 360, h: 64 }];
     if (!away || this.mode === 'local') {
       const box = (this.mode === 'local' ? this.local : this.greet).getBoundingClientRect();
       const rr = this.root.getBoundingClientRect();
@@ -566,7 +572,7 @@ export class Overlay {
     tp.setAttribute('text-anchor', 'middle');
     text.appendChild(tp);
     svg.appendChild(text);
-    Object.assign(this.hole, { _svg: svg, _ring: ring, _arc: arc, _tp: tp, _r: 0 });
+    Object.assign(this.hole, { _svg: svg, _ring: ring, _arc: arc, _text: text, _tp: tp, _r: 0 });
   }
 
   _setHoleText(t) {
@@ -582,13 +588,15 @@ export class Overlay {
     const h = this.hole;
     const p = g.project(0, 0, 0, this._hp || (this._hp = {}));
     const r0 = g.holeRadius();
+    // Place the text below the disk and the hover ring just outside the photon ring.
+    const R = r0 * 2.7 + 6;
     if (!p.front || !this.homeText || r0 < 6 || r0 > 600) {
       h.style.opacity = '0';
       this._holeBox = null;
       return;
     }
-    // Place the text below the disk and the hover ring just outside the photon ring.
-    const R = r0 * 2.7 + 6;
+    // Close up the text would end under the toolbar: then only the hover ring stays.
+    h._text.style.opacity = p.y + R > g.height - 78 ? '0' : '';
     const ringR = r0 * 2.3;
     // Rebuild the arc (and with it the glyph layout) only on a clear change, so its curvature fits.
     // Rebuilding on every change over 0.4 px with a rounded-up size made the text stand still for a
@@ -659,413 +667,16 @@ export class Overlay {
     this._taskIndex = ((this._taskIndex ?? -1) + 1) % list.length;
     g.focusNode(list[this._taskIndex].id);
   }
-  // Dashboard
+  // Dashboard: see dashboard.js
   toggleDash(force) {
-    const open = force ?? !this.dash.classList.contains('is-open');
-    if (open === this.dash.classList.contains('is-open')) return;
-    this.dash.classList.toggle('is-open', open);
-    this.root.classList.toggle('dash-open', open);
-    const win = this.root.win;
-    win.clearTimeout(this._arriveTimer);
-    if (open) {
-      // Arriving: sections rise one after the other, numbers count up, the ring draws itself. Only
-      // while the panel opens; a rebuild after the vault changed shows everything at once.
-      this._arriving = !win.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      this.dash.classList.toggle('is-arriving', this._arriving);
-      this._buildDash();
-      this._arriveTimer = win.setTimeout(() => {
-        this._arriving = false;
-        this.dash.classList.remove('is-arriving');
-      }, 1900);
-      win.setTimeout(() => this.input?.focus(), 30);
-    } else {
-      this._arriving = false;
-      this.dash.classList.remove('is-arriving');
-    }
-  }
-
-  // Shift the galaxy left to make room for the dashboard.
-  _buildDash() {
-    const d = this.dash;
-    d.empty();
-    const head = el('div', 'aat-dash-head', d);
-    const title = el('div', 'aat-dash-title', head);
-    const now = new Date();
-    el('div', 'aat-dash-date', title, `${WEEKDAYS[now.getDay()]}, ${fmtDay(now.getTime())}, ${now.getFullYear()}`);
-    el('div', 'aat-dash-name', title, 'Overview');
-    const close = el('div', 'aat-close', head);
-    close.setAttribute('aria-label', 'Close');
-    setIcon(close, 'x');
-    close.addEventListener('click', () => this.toggleDash(false));
-
-    const sb = el('label', 'aat-search', d);
-    setIcon(el('span', 'aat-search-icon', sb), 'search');
-    const input = (this.input = el('input', '', sb));
-    input.type = 'text';
-    input.placeholder = 'Search notes and sections';
-    input.spellcheck = false;
-    this.body = el('div', 'aat-dash-body', d);
-    this.query = '';
-    this.day = null;
-    const win = input.win;
-    let timer = 0;
-    input.addEventListener('input', () => {
-      win.clearTimeout(timer);
-      timer = win.setTimeout(() => this._runSearch(input.value), 120);
-    });
-    input.addEventListener('keydown', (e) => {
-      const items = [...this.body.querySelectorAll('.aat-result')];
-      if (!items.length) return;
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        this.sel = Math.max(0, Math.min(items.length - 1, (this.sel ?? -1) + (e.key === 'ArrowDown' ? 1 : -1)));
-        items.forEach((x, i) => x.classList.toggle('is-active', i === this.sel));
-        items[this.sel].scrollIntoView({ block: 'nearest' });
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        items[this.sel ?? 0]?.click();
-      }
-    });
-    this._buildDashHome();
-  }
-
-  // A section of the dashboard: its number, its name, a hairline to the edge, optionally something on
-  // the right. --i staggers the sections while the panel arrives.
-  _section(parent, label, aside, note) {
-    const no = (this._secNo = (this._secNo || 0) + 1);
-    const sec = el('section', 'aat-sec', parent);
-    sec.style.setProperty('--i', String(no));
-    const h = el('div', 'aat-sec-head', sec);
-    el('span', 'aat-sec-no', h, String(no).padStart(2, '0'));
-    el('span', 'aat-sec-label', h, label);
-    el('i', 'aat-sec-rule', h);
-    if (note) el('span', 'aat-sec-note', h, note);
-    if (aside) h.appendChild(aside);
-    return sec;
-  }
-
-  // A row of a list: optionally its place, the name, a value on the right.
-  _leaderRow(parent, name, value, onClick, no) {
-    const row = el('div', 'aat-lead', parent);
-    if (no != null) el('span', 'aat-lead-no', row, String(no).padStart(2, '0'));
-    el('span', 'aat-lead-name', row, name);
-    el('span', 'aat-lead-val', row, value);
-    if (onClick) row.addEventListener('click', onClick);
-    return row;
-  }
-
-  // Count a number up from zero while the panel arrives.
-  _count(node, value) {
-    const text = (v) => v.toLocaleString('en-US');
-    const win = this.root.win;
-    if (!this._arriving || value < 2) {
-      node.textContent = text(value);
-      return;
-    }
-    node.textContent = '0';
-    const start = win.performance.now() + 220;
-    const step = (now) => {
-      if (!node.isConnected) return;
-      const k = Math.min(1, Math.max(0, (now - start) / 950));
-      node.textContent = text(Math.round(value * (1 - Math.pow(1 - k, 3))));
-      if (k < 1) win.requestAnimationFrame(step);
-    };
-    win.requestAnimationFrame(step);
-  }
-
-  _buildDashHome() {
-    const plugin = this.view.plugin;
-    const s = plugin.getModel().stats;
-    const g = this.view.galaxy;
-    const b = this.body;
-    b.empty();
-    this._secNo = 0;
-    this.dash.style.setProperty('--aat-chart', plugin.chartColor());
-
-    // Activity over the past 84 days
-    const act = this._section(b, 'Activity', this._swatches(), '12 weeks');
-    // Keep the selected day when the vault changes.
-    const keep = this.day?.t;
-    this.day = s.activity.find((d) => d.t === keep) ?? null;
-    this._ring(act, s.activity);
-    if (this.day) this.ticks[s.activity.indexOf(this.day)]?.classList.add('is-picked');
-    this.dayList = el('div', 'aat-daylist', act);
-    this._showDay(this.day);
-
-    // Vault totals
-    const stock = this._section(b, 'Vault');
-    const nums = el('div', 'aat-nums', stock);
-    const num = (n, label, into = nums) => {
-      const c = el('div', 'aat-numcell', into);
-      this._count(el('div', 'aat-big', c), n);
-      el('div', 'aat-small', c, label);
-      return c;
-    };
-    num(s.pages, s.pages === 1 ? 'note' : 'notes');
-    num(s.ideas, s.ideas === 1 ? 'idea' : 'ideas');
-    num(s.links, s.links === 1 ? 'link' : 'links');
-    const per = s.pages ? (s.links / s.pages).toFixed(1) : '0';
-    el('div', 'aat-note', stock, `${s.newWeek} new and ${s.updatedWeek} edited in the last 7 days · ${per} links per note`);
-
-    // Tasks (setting "Show tasks"): how many are open, what is due next, and the filter of the galaxy
-    const openTasks = plugin.settings.tasks && g ? g.openTasks() : [];
-    if (openTasks.length) {
-      const toggle = this.root.ownerDocument.createElement('button');
-      toggle.className = 'aat-chip-btn';
-      const label = () => (toggle.textContent = g.taskFilter ? 'Show all' : 'Show in galaxy');
-      label();
-      toggle.addEventListener('click', () => {
-        this.toggleTaskFilter();
-        label();
-      });
-      const sec = this._section(b, 'Tasks', toggle);
-      const cells = el('div', 'aat-nums aat-task-nums', sec);
-      const count = (state) => openTasks.filter((n) => taskState(n) === state).length;
-      num(count('overdue'), 'overdue', cells).classList.add('is-overdue');
-      num(count('open'), 'open', cells).classList.add('is-open');
-      num(count('partial'), 'partly done', cells).classList.add('is-partial');
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      for (const it of s.comingUp) {
-        const days = Math.round((it.due - today.getTime()) / DAY);
-        const when = days < 0 ? `since ${fmtDay(it.due)}` : days === 0 ? 'today' : days === 1 ? 'tomorrow' : fmtDay(it.due);
-        const row = this._leaderRow(sec, it.title, when, () => {
-          if (g.nodeById.has(it.path)) g.focusNode(it.path);
-          else this.view.openPath(it.path);
-        });
-        row.classList.toggle('is-overdue', days < 0);
-        row.classList.toggle('is-soon', days >= 0 && days <= 7);
-      }
-    }
-
-    // Cluster distribution
-    const cl = this._section(b, 'Clusters');
-    const list = s.byCluster.filter((c) => c.key !== '__center' && c.ideas > 0);
-    const total = list.reduce((a, c) => a + c.ideas, 0) || 1;
-    const spec = el('div', 'aat-spectrum', cl);
-    const legend = el('div', 'aat-legend', cl);
-    const fly = (c) => {
-      if (this.mode !== 'global') this.view.toggleMode();
-      this.root.win.setTimeout(() => this.view.galaxy?.flyToCluster(c.key), 60);
-    };
-    const segs = [];
-    for (const c of list) {
-      const color = this.view.galaxy?.clusterColorCss(c.key) || '';
-      const seg = el('i', '', spec);
-      // While arriving the bar grows from nothing
-      seg.style.flexGrow = this._arriving ? '0' : String(c.ideas);
-      seg.style.background = color;
-      seg.title = `${c.name}: ${c.ideas}`;
-      segs.push([seg, c.ideas]);
-      const row = el('div', 'aat-leg', legend);
-      el('span', 'aat-leg-dot', row).style.background = color;
-      el('span', 'aat-leg-name', row, c.name);
-      el('span', 'aat-leg-val', row, `${Math.round((c.ideas / total) * 100)}%`);
-      row.title = `${c.ideas} ${c.ideas === 1 ? 'idea' : 'ideas'} · fly to cluster`;
-      const hi = (on) => {
-        seg.classList.toggle('is-hot', on);
-        row.classList.toggle('is-hot', on);
-        spec.classList.toggle('has-hot', on);
-      };
-      for (const x of [row, seg]) {
-        x.addEventListener('pointerenter', () => hi(true));
-        x.addEventListener('pointerleave', () => hi(false));
-        x.addEventListener('click', () => fly(c));
-      }
-    }
-    if (this._arriving) {
-      const win = this.root.win;
-      win.setTimeout(() => {
-        for (const [seg, grow] of segs) seg.style.flexGrow = String(grow);
-      }, 420);
-    }
-
-    const hubs = this._section(b, 'Most connected');
-    s.mostConnected.forEach((p, i) => this._leaderRow(hubs, p.name, String(p.degree), () => this.view.openPath(p.path), i + 1));
-
-    const rec = this._section(b, 'Recently edited');
-    s.recent.forEach((p, i) => this._leaderRow(rec, p.name, ago(p.mtime), () => this.view.openPath(p.path), i + 1));
-
-    // Signature at the end of the sheet
-    const foot = el('div', 'aat-dash-foot', b);
-    el('span', '', foot, 'Accretion Atlas');
-    el('span', '', foot, plugin.manifest.version);
-    el('span', 'aat-dash-foot-vault', foot, this.view.app.vault.getName());
-  }
-
-  // Offer the accent, palette swatches and a custom color.
-  _swatches() {
-    const plugin = this.view.plugin;
-    const box = this.root.ownerDocument.createElement('div');
-    box.className = 'aat-swatches';
-    const cur = plugin.settings.chartColor;
-    const pick = async (token) => {
-      await plugin.setChartColor(token);
-      this.dash.style.setProperty('--aat-chart', plugin.chartColor());
-      for (const x of box.children) x.classList.toggle('is-on', x.dataset.token === token || (x.dataset.token === 'custom' && token.startsWith('#')));
-    };
-    const tokens = ['accent', ...plugin.colors.palette.map((_, i) => 'p' + i)];
-    for (const t of tokens) {
-      const sw = el('span', 'aat-sw', box);
-      sw.dataset.token = t;
-      sw.style.background = plugin.chartColor(t);
-      sw.setAttribute('aria-label', t === 'accent' ? 'Theme accent color' : `Graph color ${Number(t[1]) + 1}`);
-      sw.classList.toggle('is-on', t === cur);
-      sw.addEventListener('click', () => pick(t));
-    }
-    const custom = el('label', 'aat-sw aat-sw-custom', box);
-    custom.dataset.token = 'custom';
-    custom.setAttribute('aria-label', 'Custom color');
-    custom.classList.toggle('is-on', cur.startsWith('#'));
-    if (cur.startsWith('#')) custom.style.background = cur;
-    const input = el('input', '', custom);
-    input.type = 'color';
-    input.value = cur.startsWith('#') ? cur : '#d79b75';
-    input.addEventListener('input', () => {
-      custom.style.background = input.value;
-    });
-    input.addEventListener('change', () => pick(input.value));
-    return box;
-  }
-
-  _ring(parent, days) {
-    const NS = 'http://www.w3.org/2000/svg';
-    const doc = this.root.ownerDocument;
-    const wrap = el('div', 'aat-ring', parent);
-    const svg = doc.createElementNS(NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 280 280');
-    wrap.appendChild(svg);
-    const node = (tag, attrs, into = svg) => {
-      const n = doc.createElementNS(NS, tag);
-      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
-      into.appendChild(n);
-      return n;
-    };
-    const C = 140, R0 = 74, LEN = 46;
-    const n = days.length;
-    const max = Math.max(1, ...days.map((d) => d.edited.length));
-    // The top gap marks the present. Days run clockwise from oldest to newest.
-    const ang = (i) => ((-90 + 7 + (i / (n - 1)) * 346) * Math.PI) / 180;
-    const pt = (a, r) => [C + Math.cos(a) * r, C + Math.sin(a) * r];
-    node('circle', { cx: C, cy: C, r: R0, class: 'aat-ring-base' });
-    node('circle', { cx: C, cy: C, r: R0 + LEN + 4, class: 'aat-ring-outer' });
-    const [nx, ny] = pt(-Math.PI / 2, R0 + LEN + 4);
-    node('circle', { cx: nx, cy: ny, r: 2.2, class: 'aat-ring-now' });
-    this.ticks = [];
-    days.forEach((d, i) => {
-      const a = ang(i);
-      const g = node('g', { class: 'aat-tick' + (i === n - 1 ? ' is-today' : ''), style: `--i:${i}` });
-      const k = d.edited.length;
-      const age = 0.35 + 0.65 * (i / (n - 1));
-      if (k) {
-        const len = 4 + LEN * Math.sqrt(k / max);
-        const [x1, y1] = pt(a, R0 + 3);
-        const [x2, y2] = pt(a, R0 + 3 + len);
-        node('line', { x1, y1, x2, y2, pathLength: 1, class: 'aat-tick-bar', 'stroke-opacity': age.toFixed(2) }, g);
-      } else {
-        const [x, y] = pt(a, R0 + 4);
-        node('circle', { cx: x, cy: y, r: 0.9, class: 'aat-tick-zero' }, g);
-      }
-      if (d.created) {
-        const [x, y] = pt(a, R0 - 7);
-        node('circle', { cx: x, cy: y, r: Math.min(3.2, 1.1 + Math.sqrt(d.created) * 0.7), class: 'aat-tick-new' }, g);
-      }
-      // Label the first day of each month.
-      const date = new Date(d.t);
-      if (date.getDate() === 1) {
-        const [x, y] = pt(a, R0 + LEN + 17);
-        const t = node('text', { x, y, class: 'aat-ring-month', 'text-anchor': 'middle', 'dominant-baseline': 'middle' });
-        t.textContent = MONTHS[date.getMonth()];
-      }
-      // Widen the invisible hit target.
-      const [hx1, hy1] = pt(a, R0 - 12);
-      const [hx2, hy2] = pt(a, R0 + LEN + 6);
-      const hit = node('line', { x1: hx1, y1: hy1, x2: hx2, y2: hy2, class: 'aat-tick-hit' }, g);
-      hit.addEventListener('pointerenter', () => this._ringFocus(d, g));
-      hit.addEventListener('pointerleave', () => this._ringFocus(null, null));
-      hit.addEventListener('click', () => {
-        this.day = this.day === d ? null : d;
-        for (const t of this.ticks) t.classList.toggle('is-picked', t === g && !!this.day);
-        this._showDay(this.day);
-      });
-      this.ticks.push(g);
-    });
-    // The center shows the weekly total or the day under the pointer.
-    const mid = (this.ringMid = el('div', 'aat-ring-mid', wrap));
-    const week = days.slice(-7).reduce((a, d) => a + d.edited.length, 0);
-    const created = days.reduce((a, d) => a + d.created, 0);
-    this.ringDefault = [String(week), 'edited this week', `${created} created in 12 weeks`];
-    this._ringFocus(null, null);
-  }
-
-  _ringFocus(d, g) {
-    const mid = this.ringMid;
-    if (!mid) return;
-    mid.empty();
-    this.ticks?.forEach((t) => t.classList.toggle('is-hover', t === g));
-    const [a, b, c] = d
-      ? [String(d.edited.length), `edited · ${WEEKDAYS[new Date(d.t).getDay()]}, ${fmtDay(d.t)}`, d.created ? `${d.created} created` : '']
-      : this.ringDefault;
-    const num = el('div', 'aat-ring-num', mid);
-    if (d) num.textContent = a;
-    else this._count(num, Number(a));
-    el('div', 'aat-ring-lbl', mid, b);
-    if (c) el('div', 'aat-ring-sub', mid, c);
-  }
-
-  _showDay(d) {
-    const box = this.dayList;
-    if (!box) return;
-    box.empty();
-    box.classList.toggle('is-open', !!d);
-    if (!d) {
-      el('div', 'aat-note', box, 'Each bar shows how many notes you edited that day. An inner dot marks new notes. Select a day to see its notes.');
-      return;
-    }
-    el('div', 'aat-day-head', box, `${WEEKDAYS[new Date(d.t).getDay()]}, ${fmtDay(d.t)}`);
-    if (!d.edited.length) el('div', 'aat-note', box, 'No notes were edited that day.');
-    for (const p of d.edited.slice(0, 12)) {
-      const t = new Date(p.mtime);
-      this._leaderRow(box, p.name, `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`, () => this.view.openPath(p.path));
-    }
-    if (d.edited.length > 12) el('div', 'aat-note', box, `and ${d.edited.length - 12} more`);
-  }
-
-  async _runSearch(q) {
-    this.query = q.trim();
-    this.sel = undefined;
-    if (this.query.length < 2) {
-      this._buildDashHome();
-      return;
-    }
-    const results = await this.view.plugin.search(this.query);
-    if (q.trim() !== this.query) return;
-    const b = this.body;
-    b.empty();
-    if (!results.length) {
-      el('div', 'aat-noresult', b, 'No results found.');
-      return;
-    }
-    const list = el('div', 'aat-results', b);
-    for (const r of results) {
-      const it = el('div', 'aat-result', list);
-      el('div', 'aat-r-title', it, r.heading ? `${r.name} › ${r.heading}` : r.name);
-      el('div', 'aat-r-cl', it, r.cluster);
-      if (r.snippet) {
-        const sn = el('div', 'aat-r-snip', it);
-        const [a, m, z] = r.snippet;
-        sn.append(a);
-        el('mark', '', sn, m);
-        sn.append(z);
-      }
-      it.addEventListener('click', (e) => {
-        this.view.openPath(r.path, r.heading, e.ctrlKey || e.metaKey);
-        this.view.galaxy?.focusNode(r.heading ? `${r.path}#${r.heading}` : r.path);
-      });
-    }
+    if (this.mode === 'local' && force !== false) return;
+    this.dashboard.toggle(force);
   }
 
   dispose() {
+    this.dashboard.dispose();
     this.root.removeEventListener('keydown', this._onKey);
+    this.root.removeEventListener('keyup', this._onKeyUp);
+    this.root.removeEventListener('focusout', this._onBlur);
   }
 }

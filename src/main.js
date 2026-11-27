@@ -5,6 +5,7 @@ import { Galaxy } from './galaxy.js';
 import { LaunchLoadingScreen, Overlay } from './overlay.js';
 import { writeFile, readFile, chmod, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { userInfo } from 'node:os';
 import launchScript from '../launcher/launch.sh';
 import launchQml from '../launcher/Launch.qml';
 import starlightQml from '../launcher/Starlight.qml';
@@ -122,10 +123,19 @@ class GalaxyView extends ItemView {
     this.prevVisit = this.plugin.prevVisit;
     this.ready = true;
     this.stopWatchingWindow = this.root.onWindowMigrated?.(() => this._rebuild());
+    // The keys of the view (Tab for the dashboard) need the keyboard: take it when the view becomes active.
+    this.registerEvent(this.app.workspace.on('active-leaf-change', (leaf) => {
+      if (leaf === this.leaf) this.takeKeyboard();
+    }));
+    if (this.app.workspace.getActiveViewOfType(GalaxyView) === this) this.takeKeyboard();
     // Wait one tick so setState can supply the view mode after onOpen.
     this.root.win.setTimeout(() => {
       if (this.ready && !this.galaxy) this._rebuild();
     }, 0);
+  }
+
+  takeKeyboard() {
+    if (!this.root.contains(this.root.ownerDocument.activeElement)) this.root.focus({ preventScroll: true });
   }
 
   _rebuild() {
@@ -153,7 +163,6 @@ class GalaxyView extends ItemView {
         onOpenNode: (n, newTab) => this.openNode(n, newTab),
         onHover: (n, m) => this.overlay.showTip(n, m),
         onFrame: (g) => this.overlay.frame(g),
-        onFps: (f) => this.overlay.setFps(f),
         onFirstFrame: loading && !loading.fade ? () => loading.reveal() : null,
         onFirstFrameError: (error) => this._showRenderError(error),
       });
@@ -291,7 +300,7 @@ class GalaxyView extends ItemView {
     if (this.root) this.applyPalette(colors);
     this.galaxy?.setColors(colors);
     this.overlay?.recolor();
-    if (this.overlay?.dash.classList.contains('is-open') && !this.overlay.query) this.overlay._buildDashHome();
+    this.overlay?.dashboard.refresh();
   }
 
   openNode(n, newTab) {
@@ -390,6 +399,8 @@ class GalaxyView extends ItemView {
 // Muted warm gray that matches the accretion disk.
 const DEFAULT_NEBULA = '#958b84';
 const DEFAULTS = {
+  // Name in the greeting; empty = the name of the user account on this computer
+  userName: '',
   chartColor: 'accent',
   usePywal: false,
   nebulaColor: DEFAULT_NEBULA,
@@ -438,6 +449,7 @@ export default class AccretionAtlas extends Plugin {
     this.addRibbonIcon(ICON, 'Open global galaxy', () => this.openGlobal());
     this.addCommand({ id: 'open-global', name: 'Open global galaxy', callback: () => this.openGlobal() });
     this.addCommand({ id: 'open-local', name: 'Open local galaxy', callback: () => this.openLocal() });
+    this.addCommand({ id: 'open-dashboard', name: 'Open dashboard', callback: () => this.openDashboard() });
 
     // obsidian://accretion-atlas: the desktop launcher opens the galaxy as a window of its own; without
     // the launcher setting the link just opens the global galaxy
@@ -489,6 +501,20 @@ export default class AccretionAtlas extends Plugin {
   refreshColors() {
     this.colors = readColors(this.settings.usePywal);
     for (const view of this.views()) view.recolor(this.colors);
+  }
+
+  // The name the greeting uses: the one from the settings, or else the user account's.
+  userName() {
+    const own = String(this.settings.userName || '').trim();
+    if (own) return own;
+    if (this._accountName == null) {
+      try {
+        this._accountName = userInfo().username || '';
+      } catch {
+        this._accountName = '';
+      }
+    }
+    return this._accountName;
   }
 
   chartColor(token = this.settings.chartColor) {
@@ -650,6 +676,12 @@ export default class AccretionAtlas extends Plugin {
     const leaf = ws.getLeaf('tab');
     await leaf.setViewState({ type: VIEW_TYPE, state: { mode: 'global' }, active: true });
     ws.revealLeaf(leaf);
+  }
+
+  async openDashboard() {
+    await this.openGlobal();
+    const view = this.views().find((v) => v.mode !== 'local');
+    view?.overlay?.toggleDash(true);
   }
 
   async openLocal() {
@@ -850,6 +882,15 @@ class AtlasSettings extends PluginSettingTab {
         st[key] = value.trim();
         plugin.saveSettingsSoon();
         plugin.modelSettingsChanged();
+      }));
+
+    new Setting(el)
+      .setName('Your name')
+      .setDesc('For the greeting over the galaxy and in the dashboard. Leave it empty to use the name of your user account on this computer.')
+      .addText((t) => t.setPlaceholder(plugin.userName()).setValue(st.userName).onChange((value) => {
+        st.userName = value.trim();
+        plugin.saveSettingsSoon();
+        for (const view of plugin.views()) view.refresh();
       }));
 
     new Setting(el).setName('Colors').setHeading();

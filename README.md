@@ -19,9 +19,9 @@ Explore your notes as stars orbiting a black hole. An Obsidian plugin that draws
 - **Global galaxy.** Every note is a star. Headings of level 1 to 3 are smaller stars, joined to their note in the order of the document like a constellation. Linked attachments are faint points. Notes are grouped into clusters by folder; notes at the vault root share a cluster of their own.
 - **Local galaxy.** The active note sits in the middle, its sections circle it, and the notes it links to lie further out, up to two steps away. It follows the note you have open.
 - **Preview.** Hover over a star to see the title at once and, after a moment, the start of the note or section.
-- **Dashboard.** Search, activity and an overview of the vault in a panel on the right.
+- **Dashboard.** Search, activity, tasks and the vault in numbers on one sheet over the galaxy.
 
-Open the galaxy from the ribbon, or run **Open global galaxy** or **Open local galaxy** from the command palette. The local galaxy opens in the right sidebar.
+Open the galaxy from the ribbon, or run **Open global galaxy** or **Open local galaxy** from the command palette. The local galaxy opens in the right sidebar. **Open dashboard** opens the global galaxy with its dashboard; give it a hotkey to get there from anywhere.
 
 ## Controls
 
@@ -31,29 +31,37 @@ Open the galaxy from the ribbon, or run **Open global galaxy** or **Open local g
 | Click a star | Open the note or heading (`Ctrl` + click: in a new tab) |
 | Double-click a star | Fly to it |
 | Click a cluster name | Fly into the cluster |
+| Hover over a cluster name | Light its cluster and dim the others |
 | Hover over a star | Title, then a preview |
 | Click the black hole | Back to the starting view |
-| **Home** at the top | Open or close the dashboard |
+| **Dashboard** in the bar at the bottom, `Tab` or `/` | Open the dashboard |
 | **Local** / **Global** at the top right | Switch between the two views |
-| Bar at the bottom | Zoom, reset the view, pause the motion, full screen |
-| `Esc` | Close the dashboard |
+| Bar at the bottom | Dashboard, zoom, reset the view, pause the motion, full screen |
+| Arrow keys, `+` / `-`, `Space` | Turn the view, zoom, pause the motion |
+| `Esc` | In the dashboard: empty the search, then close it. In the galaxy: back to the starting view |
 
 With [tasks](#tasks) turned on, the bar at the bottom gets a button that shows only open tasks. A counter then appears at the top; click it to fly to the next one.
 
 ## Dashboard
 
-**Home** opens a panel on the right, and the galaxy moves aside to make room.
+The dashboard is a sheet over the whole view, with the galaxy blurred behind it. It scales with the window, so a large window shows it large. Open it with **Dashboard** in the bar at the bottom, with `Tab` or `/` while the galaxy has the keyboard, or by clicking the news under the greeting. The search has the keyboard right away.
 
 - **Search** across note names, headings and the text of your notes. Arrow keys and `Enter` work; choosing a result opens the note and flies to its star.
-- **Activity** of the last 12 weeks as a ring. Each bar is a day and shows how many notes you edited; an inner dot marks new notes. Select a day to list its notes. The swatches next to the title set the color of the ring, which is also the accent of the panel.
+- **Activity** of the last 12 weeks as a ring. Each bar is a day and shows how many notes you edited; an inner dot marks new notes. Beside it are the notes you edited last. Select a day on the ring to list its notes instead.
+- **Tasks**, when turned on: how many are overdue, open and partly done, and what is due next. **Show in galaxy** leaves only the open tasks lit.
+- **Most connected** notes.
 - **Vault**: notes, ideas (the headings of your notes, at least one per note) and links, counted.
-- **Tasks**, when turned on: how many are overdue, open and partly done, and what is due next.
 - **Clusters** by size. Click one to fly there.
-- **Most connected** and **recently edited** notes.
+
+Whatever leads into the galaxy or to a note closes the dashboard. The swatches at the bottom right set its accent, which is also the color of the ring.
 
 ## Settings
 
 Everything is under **Settings → Accretion Atlas**.
+
+### Your name
+
+The galaxy and the dashboard greet you by name. Without a name here they use the name of your user account on this computer.
 
 ### Colors
 

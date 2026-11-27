@@ -22,6 +22,10 @@ const GM_NODES = GM_DUST * 0.45;
 const GM_COMET = 2.6e6;
 
 const TAU = Math.PI * 2;
+// How far the camera may move away. Beyond this the galaxy is a small spot; the cluster names fade
+// out shortly before (LABEL_FADE, used by the overlay).
+export const MAX_DISTANCE = 2800;
+export const LABEL_FADE = [2150, 2650];
 const IDLE_MS = 5000; // Idle delay before switching from 60 to 30 fps.
 const SIM_SETTLE_MS = 6000; // Time to keep layout forces active after a data change.
 const STAR_WHITE = [1.0, 0.95, 0.88];
@@ -175,7 +179,7 @@ export class Galaxy {
     const c = (this.controls = new OrbitControls(this.camera, r.domElement));
     Object.assign(c, {
       enableDamping: true, dampingFactor: 0.06, rotateSpeed: 0.55, zoomSpeed: 0.9, panSpeed: 0.6,
-      minDistance: 90, maxDistance: 4200, autoRotate: true, autoRotateSpeed: 0,
+      minDistance: 90, maxDistance: MAX_DISTANCE, autoRotate: true, autoRotateSpeed: 0,
     });
     c.addEventListener('start', () => {
       this.wake();
@@ -285,7 +289,7 @@ export class Galaxy {
       vertexShader: STAR_VERT, fragmentShader: STAR_FRAG,
       uniforms: {
         uScale: this.uScale, uTime: this.uTime, uMinPx: { value: 2.0 }, uFocus: this.uFocus, uReveal: this.uReveal,
-        uLensRs: this.uLens, uSecondary: { value: 0 },
+        uLensRs: this.uLens, uSecondary: { value: 0 }, uDpr: this.uDpr,
       },
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     });
@@ -571,6 +575,7 @@ export class Galaxy {
   // Graph data
   setData(data) {
     const old = this.nodeById;
+    this.clusterHover = null;
     this.centerId = data.centerId || null;
     this.clusters = data.clusters.map((c) => ({ ...c }));
     this.clusterByKey = new Map(this.clusters.map((c) => [c.key, c]));
@@ -949,6 +954,7 @@ export class Galaxy {
     g.setAttribute('aAlpha', new THREE.BufferAttribute(new Float32Array(n), 1));
     g.setAttribute('aPhase', new THREE.BufferAttribute(new Float32Array(this.nodes.map((x) => x.phase)), 1));
     g.setAttribute('aPulse', new THREE.BufferAttribute(new Float32Array(n), 1));
+    g.setAttribute('aMark', new THREE.BufferAttribute(new Float32Array(n), 1));
     this.stars = new THREE.Points(g, this.starMat);
     this.stars.frustumCulled = false;
     this.stars.renderOrder = 2;
@@ -1005,14 +1011,23 @@ export class Galaxy {
     dc.needsUpdate = true;
     }
     if (this.cometColor) this.cometColor.setRGB(0.92 + acc[0] * 0.08, 0.92 + acc[1] * 0.08, 0.95 + acc[2] * 0.05);
-    if (!this.stars) return;
+    this._restyle();
+  }
 
+  // Colors, sizes and brightness of the stars and links. They depend on what is under the pointer
+  // (a star or a cluster name) and on the task filter, so this runs on every such change.
+  _restyle() {
+    if (!this.stars) return;
+    const acc = this.colors?.accent || [1, 0.8, 0.6];
     const hv = this.hover;
     const nb = hv ? this.neighbors.get(hv.id) : null;
+    // A cluster name under the pointer lights its cluster; a star under the pointer goes first.
+    const hc = hv ? null : this.clusterHover;
     const col = this.stars.geometry.getAttribute('aColor');
     const al = this.stars.geometry.getAttribute('aAlpha');
     const sz = this.stars.geometry.getAttribute('aSize');
     const pu = this.stars.geometry.getAttribute('aPulse');
+    const mk = this.stars.geometry.getAttribute('aMark');
     const filter = this.taskFilter;
     this.nodes.forEach((n, i) => {
       const cc = this.clusterByKey.get(n.cluster)?.color || acc;
@@ -1034,26 +1049,33 @@ export class Galaxy {
       }
       if (hv) {
         if (n === hv) {
-          c = mix3([1, 1, 1], acc, 0.35).map((x) => x * 1.6);
-          s = Math.min(s * 1.7, n.size * 2.2);
+          // The star itself stays a point: it is marked by its rays (aMark), not by its size.
+          c = mix3([1, 1, 1], acc, 0.5).map((x) => x * 1.3);
+          s *= 1.25;
           a = Math.max(a, 1);
         } else if (nb?.has(n.id)) {
           c = mix3(c, acc, 0.55).map((x) => x * 1.25);
           s *= 1.2;
         } else a *= 0.25;
+      } else if (hc != null) {
+        if (n.cluster === hc) {
+          c = mix3(c, cc, 0.3).map((x) => x * 1.15);
+          s *= 1.12;
+        } else a *= 0.22;
       }
+      mk.setX(i, n === hv ? 1 : 0);
       col.setXYZ(i, c[0], c[1], c[2]);
       al.setX(i, a);
       sz.setX(i, s);
     });
-    col.needsUpdate = al.needsUpdate = sz.needsUpdate = pu.needsUpdate = true;
+    col.needsUpdate = al.needsUpdate = sz.needsUpdate = pu.needsUpdate = mk.needsUpdate = true;
 
     const lc = this.lines.geometry.getAttribute('aColor');
     const la = this.lines.geometry.getAttribute('aAlpha');
     this.links.forEach((l, i) => {
       const s = l.source, t = l.target;
       const cc = this.clusterByKey.get(s.cluster)?.color || acc;
-      let c, a;
+      let c, a, a2;
       if (l.kind === 'tree') {
         c = mix3([1, 1, 1], cc, 0.08);
         a = s.cluster === '__center' || s.id === this.centerId ? 0.05 : 0.032;
@@ -1065,16 +1087,22 @@ export class Galaxy {
         a = s.cluster === t.cluster ? 0.022 : 0.01;
       }
       if (filter) a *= 0.15;
+      a2 = a;
       if (hv) {
         if (s === hv || t === hv) {
+          // The links of the star start bright at the star and fade towards the other end.
           c = acc;
-          a = 0.85;
-        } else a *= 0.25;
+          a = s === hv ? 0.6 : 0.1;
+          a2 = t === hv ? 0.6 : 0.1;
+        } else a = a2 = a * 0.25;
+      } else if (hc != null) {
+        if (s.cluster === hc && t.cluster === hc) a = a2 = a * 1.6;
+        else a = a2 = a * 0.25;
       }
       lc.setXYZ(i * 2, c[0], c[1], c[2]);
       lc.setXYZ(i * 2 + 1, c[0], c[1], c[2]);
       la.setX(i * 2, a);
-      la.setX(i * 2 + 1, a);
+      la.setX(i * 2 + 1, a2);
     });
     lc.needsUpdate = la.needsUpdate = true;
   }
@@ -1084,12 +1112,20 @@ export class Galaxy {
       const n = this.nodeById.get(m.id);
       if (n) n.task = m.task;
     }
-    this._recolor();
+    this._restyle();
   }
   // Filter: only open tasks stay bright
   setTaskFilter(on) {
     this.taskFilter = on;
-    this._recolor();
+    this._restyle();
+  }
+
+  // The cluster whose name is under the pointer (null: none): its stars stay bright, the others dim.
+  setClusterHover(key) {
+    if (this.clusterHover === key) return;
+    this.clusterHover = key;
+    this.wake();
+    this._restyle();
   }
   // Open tasks, overdue ones first, then by due date
   openTasks() {
@@ -1103,7 +1139,7 @@ export class Galaxy {
   setHover(node, anchored = false) {
     if (this.hover === node) return;
     this.hover = node;
-    this._recolor();
+    this._restyle();
     this.opts.onHover?.(node, anchored ? null : this._mouse);
   }
 
@@ -1271,8 +1307,36 @@ export class Galaxy {
 
   zoomBy(f) {
     const t = this.controls.target.clone();
-    const p = t.clone().add(this.camera.position.clone().sub(t).multiplyScalar(f));
-    this.flyTo(t, p, this.follow, 0.5);
+    const off = this.camera.position.clone().sub(t);
+    off.setLength(Math.min(this.controls.maxDistance, Math.max(this.controls.minDistance, off.length() * f)));
+    this.flyTo(t, t.clone().add(off), this.follow, 0.5);
+  }
+
+  // Keyboard: turn the camera around its target while a key is held. az and el are -1, 0 or 1.
+  setOrbitInput(az, el) {
+    this._orbitIn = az || el ? { az, el } : null;
+    this.wake();
+  }
+
+  _orbitByKeys(dt) {
+    const want = this._orbitIn;
+    const v = (this._orbitVel ||= { az: 0, el: 0 });
+    // Ease in and out, so the turn starts and stops softly.
+    const k = Math.min(1, dt * 7);
+    v.az += ((want?.az || 0) - v.az) * k;
+    v.el += ((want?.el || 0) - v.el) * k;
+    if (Math.abs(v.az) < 0.002 && Math.abs(v.el) < 0.002) {
+      v.az = v.el = 0;
+      return;
+    }
+    if (this.fly || this.intro) return;
+    this.wake();
+    this.lastInteract = performance.now();
+    const t = this.controls.target;
+    const sph = (this._orbitSph ||= new THREE.Spherical()).setFromVector3(this._v.copy(this.camera.position).sub(t));
+    sph.theta += v.az * dt * 0.9;
+    sph.phi = Math.min(Math.PI - 0.12, Math.max(0.12, sph.phi + v.el * dt * 0.7));
+    this.camera.position.copy(t).add(this._v.setFromSpherical(sph));
   }
 
   setPaused(p) {
@@ -1412,7 +1476,8 @@ export class Galaxy {
       if (n.alpha <= 0) continue;
       this.project(n.x, n.y, n.z, o);
       if (!o.front) continue;
-      const px = (n.size * this.cssScale) / o.depth;
+      // The drawn size levels off near the camera (capSize in the star shader); so does the target.
+      const px = Math.min((n.size * this.cssScale) / o.depth, 22);
       const rad = Math.max(7, px * 0.75);
       const d = Math.hypot(o.x - x, o.y - y) / rad;
       const score = d * (n.type === 'page' ? 0.8 : 1);
@@ -1499,6 +1564,7 @@ export class Galaxy {
     this.controls.autoRotate = !this.paused && !this.fly && !introCam && performance.now() - this.lastInteract > 7000;
     this.controls.autoRotateSpeed = 0.16 * Math.cos(this.time * 0.063);
     this.controls.enabled = !this.fly && !introCam;
+    this._orbitByKeys(dt);
     this.controls.update(dt);
 
     this.bhMat.uniforms.uCam.value.copy(this.camera.position).multiplyScalar(1 / RS);
@@ -1511,8 +1577,11 @@ export class Galaxy {
     const farS = 1 - big * big * (3 - 2 * big);
     const ignite = this.bhMat.uniforms.uIgnite.value;
     if (this.glow) this.glow.material.opacity = 0.3 * farS * ignite;
-    this.bloom.strength = 0.04 + 0.66 * farS + 0.45 * (this.intro?.flash || 0);
+    // Close up there is no bloom at all: the disk fills much of the view with bright gas, and even a
+    // few percent of its scattered light lie as a gray veil over the shadow and the gap around it.
+    this.bloom.strength = 0.7 * farS + 0.45 * (this.intro?.flash || 0);
     this.bloom.radius = 0.12 + 0.24 * farS;
+    this.bloom.enabled = this.bloom.strength > 0.004;
     this._writePositions();
 
     if (this._needPick && this._mouse && !this._down) {
@@ -1542,7 +1611,6 @@ export class Galaxy {
       this.fps = Math.round(this._fpsN / this._fpsAcc);
       this._fpsAcc = 0;
       this._fpsN = 0;
-      this.opts.onFps?.(this.fps);
       // Lower the render resolution when active frames are slow. Exclude the deliberate 30 fps idle limit.
       this._slow = this.fps < 40 && !this._idle ? (this._slow || 0) + 1 : 0;
       if (this._slow >= 3 && this.pixelRatio > 0.6) {
